@@ -2,6 +2,7 @@
 so every change made here shows up live in an open editor window."""
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from dataclasses import fields, is_dataclass
@@ -92,11 +93,7 @@ def _schema(obj) -> dict:
 def describe_parameters() -> dict:
     """Every parameter with its type and default, plus the allowed enum values. Parameter meanings are
     documented in ventforge/model.py; pattern.<mode> holds the settings of each layout mode."""
-    return {"enums": {"dot.shape": model.SHAPES, "pattern.mode": model.MODES, "boundary.type": model.BOUNDARIES,
-                      "gradients.target_shape": model.TARGET_SHAPES,
-                      "pattern.grid.arrangement": ("square", "diamond", "hexagon"),
-                      "rotate_by": ("row", "col", "both"), "flowlines.edge_style": ("flat", "round"),
-                      "control.kind": ("point", "line", "curve"), "gradient.falloff": ("linear", "smooth")},
+    return {"enums": model.CHOICES,  # keys: full path, or field name anywhere
             "gradient_semantics": "size/spacing are multipliers (edge 1 = neutral), angle adds degrees, "
                                   "shape morphs 0..1 towards target_shape. A control has `value` at its "
                                   "location blending to the gradient's `edge` value at distance `radius`.",
@@ -118,6 +115,10 @@ def set_params(patch: dict) -> dict:
 def add_control(target: str, kind: str = "point", points: list[list[float]] | None = None,
                 value: float = 0.2, radius: float = 50.0, enable: bool = True) -> dict:
     """Add a gradient control to target size|spacing|angle|shape. kind point (1 point), line (2), curve (>=3)."""
+    if target not in ("size", "spacing", "angle", "shape"):
+        raise ValueError(f"target must be size, spacing, angle or shape; got {target!r}")
+    if kind not in model.CHOICES["kind"]:
+        raise ValueError(f"kind must be point, line or curve; got {kind!r}")
     d = _load()
     g = getattr(d.gradients, target)
     g.controls.append(model.Control(kind=kind, points=points or [[0.0, 0.0]], value=value, radius=radius))
@@ -131,6 +132,8 @@ def add_control(target: str, kind: str = "point", points: list[list[float]] | No
 def clear_controls(target: str) -> dict:
     """Remove all controls of gradient target size|spacing|angle|shape."""
     d = _load()
+    if target not in ("size", "spacing", "angle", "shape"):
+        raise ValueError(f"target must be size, spacing, angle or shape; got {target!r}")
     getattr(d.gradients, target).controls.clear()
     d.save(_path())
     return {"stats": _stats(_generate(d))}
@@ -188,6 +191,8 @@ def cut_into_part(part_path: str, out_path: str, origin: list[float] = [0, 0, 0]
 def open_in_gui() -> str:
     """Open the current design in the VentForge desktop editor (it live-reloads when this server edits it)."""
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    if not getattr(sys, "frozen", False) and importlib.util.find_spec("PySide6") is None:
+        return 'The editor is not installed. Run: pip install "ventforge[gui]"'
     if getattr(sys, "frozen", False):  # bundled app: the executable itself is the editor
         cmd = [sys.executable, str(_path())]
     else:

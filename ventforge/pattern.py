@@ -20,6 +20,7 @@ flowlines ignore spacing.
 """
 from __future__ import annotations
 
+import functools
 import math
 from pathlib import Path
 
@@ -140,10 +141,19 @@ def _falloff(t, kind):
     return t if kind == "linear" else t * t * (3 - 2 * t)
 
 
-def _image_field(g: Gradient, xy, canvas: Canvas):
+@functools.lru_cache(maxsize=8)
+def _gray(path: str, mtime: float):
+    """Decoded grayscale image 0..1; cached so slider drags don't re-decode big photos."""
     from PIL import Image
-    with Image.open(Path(g.image)) as im:
-        a = np.asarray(im.convert("L"), dtype=np.float64) / 255.0
+    with Image.open(path) as im:
+        return np.asarray(im.convert("L"), dtype=np.float64) / 255.0
+
+
+def _image_field(g: Gradient, xy, canvas: Canvas):
+    p = Path(g.image)
+    if not p.is_file():
+        raise FileNotFoundError(f"gradient image not found: {p}")
+    a = _gray(str(p), p.stat().st_mtime)
     H, W = a.shape
     col = np.clip(((xy[:, 0] / canvas.width + 0.5) * (W - 1)).round().astype(int), 0, W - 1)
     row = np.clip(((0.5 - xy[:, 1] / canvas.height) * (H - 1)).round().astype(int), 0, H - 1)
@@ -369,7 +379,7 @@ def _grid(g, cover):
     return _rot(xy, g.rotation), g.rotation + alt * g.row_rotation, np.ones(len(xy))
 
 
-def _random(r, region, spacing, canvas, d):
+def _random(r, region, spacing, canvas):
     rng = np.random.default_rng(r.seed)
     n = min(max(int(r.count), 0), MAX_COUNT)
     if n == 0 or region.is_empty:
@@ -406,7 +416,7 @@ def _random(r, region, spacing, canvas, d):
     return xy, np.zeros(len(xy)), np.ones(len(xy))
 
 
-def _path(p, canvas, d):
+def _path(p, canvas):
     """Dots along a path plus `layers` parallel offsets, centred on the base path (half outward,
     half inward). `count` is the dot count on the base path; each layer gets dots in proportion to
     its length so the along-path step stays constant. Closed paths are offset with buffer (exact,
@@ -515,7 +525,7 @@ def _concentric(c, cover):
 
 def _fibonacci(f):
     n = np.arange(min(max(int(f.count), 0), MAX_COUNT))
-    r = f.inner_radius + f.spread * np.sqrt(n)
+    r = np.sqrt(f.inner_radius ** 2 + f.spread ** 2 * n)  # same dot density everywhere, also with a hole
     th = n * GOLDEN + math.radians(f.rotation)
     return np.c_[r * np.cos(th), r * np.sin(th)], (np.degrees(th) if f.align else np.zeros(len(n))), np.ones(len(n))
 
@@ -701,9 +711,9 @@ def generate(design: Design) -> Result:
         xy, ang, sz = _grid(pat.grid, cover)
     elif mode == "random":
         region = inner.buffer(-d / 2)
-        xy, ang, sz = _random(pat.random, region if not region.is_empty else inner, gr.spacing, design.canvas, d)
+        xy, ang, sz = _random(pat.random, region if not region.is_empty else inner, gr.spacing, design.canvas)
     elif mode == "path":
-        xy, ang, sz = _path(pat.path, design.canvas, d)
+        xy, ang, sz = _path(pat.path, design.canvas)
     elif mode == "spiral":
         xy, ang, sz = _spiral(pat.spiral)
     elif mode == "concentric":

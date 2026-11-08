@@ -40,6 +40,10 @@ async def main(OUT: Path):
         bad = await s.call_tool("set_params", {"patch": {"dot": {"nope": 1}}})
         print("bad patch rejected:", bad.is_error)
         assert bad.is_error
+        bad = await s.call_tool("add_control", {"target": "sise"})
+        assert bad.is_error
+        enums = text(await call("describe_parameters"))["enums"]
+        assert enums["pattern.crosslines.rotate_by"] == ["left", "right", "both"]
 
 
 if __name__ == "__main__":

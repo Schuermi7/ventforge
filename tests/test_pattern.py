@@ -288,6 +288,32 @@ def test_image_paths_resolve_against_design_file(tmp_path, monkeypatch):
     assert loaded.gradients.size.image == str((tmp_path / "fade.png").resolve())
     assert loaded.background.image == loaded.gradients.size.image
     assert generate(loaded).holes
+    loaded.save(tmp_path / "x.vent.json")  # saving again keeps the path relative (folder stays movable)
+    assert '"image": "fade.png"' in (tmp_path / "x.vent.json").read_text()
+
+
+def test_missing_image_is_a_clear_error(tmp_path):
+    d = Design().patched({"gradients": {"size": {"enabled": True, "image": str(tmp_path / "gone.png")}}})
+    with pytest.raises(FileNotFoundError, match="gone.png"):
+        generate(d)
+
+
+def test_unknown_choice_rejected():
+    with pytest.raises(ValueError, match="dot.shape"):
+        Design().patched({"dot": {"shape": "hexgon"}})
+    with pytest.raises(ValueError, match="rotate_by"):
+        Design().patched({"pattern": {"crosslines": {"rotate_by": "row"}}})
+
+
+def test_fibonacci_even_density_with_hole():
+    d = Design().patched({"canvas": {"width": 200, "height": 200}, "dot": {"diameter": 1},
+                          "pattern": {"mode": "fibonacci", "fibonacci": {
+                              "count": 1500, "spread": 2.0, "inner_radius": 30}}})
+    r = np.hypot(*np.array([h.centroid.coords[0] for h in generate(d).holes]).T)
+    assert r.min() >= 29
+    inner = ((r >= 30) & (r < 45)).sum() / (np.pi * (45 ** 2 - 30 ** 2))
+    outer = ((r >= 60) & (r < 75)).sum() / (np.pi * (75 ** 2 - 60 ** 2))
+    assert inner == pytest.approx(outer, rel=0.15)
 
 
 def test_huge_concentric_radius_and_path_layers_stay_fast():

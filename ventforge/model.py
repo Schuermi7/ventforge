@@ -18,6 +18,15 @@ MODES = ("grid", "random", "path", "spiral", "concentric", "fibonacci",
          "crosslines", "voronoi", "flowlines", "custom_points")
 BOUNDARIES = ("none", "circle", "rounded_rectangle", "custom")
 TARGET_SHAPES = ("circle", "rectangle", "polygon", "star")
+# allowed values of text fields, by full path or (fallback) field name; used by the GUI, the MCP
+# server and _build, which rejects anything else
+CHOICES = {
+    "arrangement": ("square", "diamond", "hexagon"), "edge_style": ("flat", "round"),
+    "falloff": ("linear", "smooth"), "shape": SHAPES, "type": BOUNDARIES, "target_shape": TARGET_SHAPES,
+    "mode": MODES, "kind": ("point", "line", "curve"),
+    "pattern.grid.rotate_by": ("row", "col", "both"),
+    "pattern.crosslines.rotate_by": ("left", "right", "both"),
+}
 
 
 @dataclass
@@ -247,8 +256,15 @@ class Design:
 
     def save(self, path: str | Path) -> None:
         p = Path(path)
+        d = self.to_dict()
+        base = p.resolve().parent
+        for g in [*d["gradients"].values(), d["background"]]:  # images next to the file stay relative,
+            if isinstance(g, dict) and g["image"]:            # so the folder can be moved or shared
+                img = Path(g["image"])
+                if img.is_absolute() and img.resolve().is_relative_to(base):
+                    g["image"] = img.resolve().relative_to(base).as_posix()
         tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(self.to_json(), encoding="utf-8")
+        tmp.write_text(json.dumps(d, indent=2), encoding="utf-8")
         for i in range(6):  # atomic replace, so a watching GUI never reads half a file
             try:
                 return tmp.replace(p)
@@ -271,22 +287,25 @@ def _merge(base: dict, patch: dict, path: str = "") -> dict:
     return out
 
 
-def _build(cls, d: dict):
+def _build(cls, d: dict, path: str = ""):
     hints = get_type_hints(cls)
     kw = {}
     for f in fields(cls):
         if f.name not in d:
             continue
-        t, v = hints[f.name], d[f.name]
+        t, v, p = hints[f.name], d[f.name], path + f.name
         if is_dataclass(t):
-            kw[f.name] = _build(t, v or {})
+            kw[f.name] = _build(t, v or {}, p + ".")
         elif getattr(t, "__origin__", None) is list and t.__args__[0] is Control:
-            kw[f.name] = [_build(Control, c) for c in v]
+            kw[f.name] = [_build(Control, c, p + ".") for c in v]
         elif t is float:
             kw[f.name] = float(v)
         elif t is int:
             kw[f.name] = int(v)
         else:
+            opts = CHOICES.get(p) or (CHOICES.get(f.name) if t is str else None)
+            if opts and v not in opts:
+                raise ValueError(f"{p} must be one of {', '.join(opts)}; got {v!r}")
             kw[f.name] = v
     return cls(**kw)
 

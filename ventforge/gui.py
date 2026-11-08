@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QButtonGroup, QCh
                                QSizePolicy, QSlider, QSpinBox, QStackedWidget, QStyle, QTabWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .model import (BOUNDARIES, MODES, SHAPES, TARGET_SHAPES, Control, Design, DotStyle, Gradient, Pattern)
+from .model import (CHOICES, MODES, SHAPES, Control, Design, DotStyle, Gradient, Pattern)
 
 PRESETS = Path(__file__).resolve().parent / "presets"
 GRADS = ("size", "spacing", "angle", "shape")
@@ -38,12 +38,6 @@ def exporter():
 
 
 # ---------------------------------------------------------------- parameter metadata
-CHOICES = {
-    "arrangement": ("square", "diamond", "hexagon"), "edge_style": ("flat", "round"),
-    "falloff": ("linear", "smooth"), "shape": SHAPES, "type": BOUNDARIES, "target_shape": TARGET_SHAPES,
-    "mode": MODES, "pattern.grid.rotate_by": ("row", "col", "both"),
-    "pattern.crosslines.rotate_by": ("left", "right", "both"),
-}
 META = {  # name: (min, max, step, suffix)
     "count": (1, 20000, 1, ""), "sides": (3, 64, 1, ""), "star_points": (3, 64, 1, ""),
     "target_sides": (3, 64, 1, ""), "layers": (1, 100, 1, ""), "irregularity": (0, 100, 5, " %"),

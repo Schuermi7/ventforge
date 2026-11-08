@@ -1,6 +1,6 @@
-[project]
+﻿[project]
 name = "ventforge"
-version = "0.1.0"
+version = "0.1.1"
 description = "Parametric vent pattern designer with native GUI and MCP server"
 readme = "README.md"
 license = "GPL-3.0-or-later"

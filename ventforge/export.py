@@ -482,10 +482,13 @@ def _cut(base, tools, what: str, planes=()):
 
 
 TOOLS_PER_CELL = 50
+UNTILED_MAX = 600  # up to this many holes one cut is as fast as tiling, and leaves no seams on the part
 
 
 def _grid_planes(n_tools, u_range, v_range, plane_u, plane_v):
     """k-1 cut planes along each axis, k chosen for ~TOOLS_PER_CELL tools per cell."""
+    if n_tools <= UNTILED_MAX:
+        return []
     k = math.ceil(math.sqrt(n_tools / TOOLS_PER_CELL))
     out = []
     for i in range(1, k):
