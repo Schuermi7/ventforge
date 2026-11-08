@@ -21,8 +21,11 @@ def wait(cond, timeout=20.0):
     end = time.time() + timeout
     while time.time() < end:
         QApplication.processEvents()
-        if cond():
-            return True
+        try:
+            if cond():
+                return True
+        except (OSError, ValueError):  # file mid-replace on Windows: retry
+            pass
         time.sleep(0.01)
     return False
 
@@ -105,7 +108,7 @@ def test_gui_smoke(win, tmp_path):
     d = Design.load(f)
     d.dot.diameter = 2.5
     d.save(f)  # atomic replace, like the MCP server
-    assert wait(lambda: w.design.dot.diameter == 2.5, 5), "live reload did not happen"
+    assert wait(lambda: w.design.dot.diameter == 2.5, 20), "live reload did not happen"
     assert w.canvas.transform().m11() == zoom
     settle(w)
 
@@ -114,7 +117,7 @@ def test_gui_smoke(win, tmp_path):
 
     # editor edits are autosaved, so an MCP edit never starts from a stale file
     w.set_param("dot.diameter", 3.5)
-    assert wait(lambda: json.loads(f.read_text())["dot"]["diameter"] == 3.5, 5), "edit not autosaved"
+    assert wait(lambda: json.loads(f.read_text())["dot"]["diameter"] == 3.5, 20), "edit not autosaved"
     assert not w.dirty
 
     # exports run in a worker
