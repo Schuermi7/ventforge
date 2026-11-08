@@ -112,31 +112,6 @@ tests/               pytest suite, including a real MCP client/server run
 .github/workflows/   CI on Windows, macOS and Linux; publishes to PyPI on version tags
 ```
 
-## Development
-
-```bash
-git clone https://github.com/Schuermi7/ventforge
-```
-
-```bash
-cd ventforge
-```
-
-```bash
-pip install -e ".[dev]"
-```
-
-Run the tests. The GUI test needs an offscreen display:
-
-```bash
-QT_QPA_PLATFORM=offscreen pytest
-```
-
-(PowerShell: `$env:QT_QPA_PLATFORM="offscreen"; pytest`)
-
-**Releasing:** bump `version` in `pyproject.toml`, commit, then push a tag such as `v0.2.0`. CI runs the
-tests and publishes to PyPI.
-
 ## Licence
 
 GPL-3.0-or-later, see [LICENSE](LICENSE). You may use, change and sell VentForge. Versions you distribute

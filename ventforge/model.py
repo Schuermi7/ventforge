@@ -47,7 +47,7 @@ class DotStyle:
     star_inner: float = 0.5       # inner radius ratio of star
     rotation: float = 0.0
     custom_points: list[Pt] = field(default_factory=list)  # unit shape, scaled to diameter
-    color: str = "#F7BB3B"        # display only
+    color: str = "#2E7D4F"        # display only
 
 
 @dataclass

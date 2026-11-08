@@ -268,7 +268,7 @@ def choice_icons(path):
                     d.dot.custom_points = [[0, 1], [0.3, 0.2], [1, 0], [0.3, -0.2], [0, -1], [-0.3, -0.2],
                                            [-1, 0], [-0.3, 0.2]]
                     d.pattern.mode, d.pattern.custom_points.points = "custom_points", [[0, 0]]
-                icons[v] = paint_thumb(*result_paths(pattern().generate(d)), "#F7BB3B", size=64)
+                icons[v] = paint_thumb(*result_paths(pattern().generate(d)), "#2E7D4F", size=64)
         except Exception:
             traceback.print_exc()
             icons = {}
@@ -539,7 +539,7 @@ class Canvas(QGraphicsView):
         self.bg = QGraphicsPixmapItem()
         self.bg.setZValue(1)
         sc.addItem(self.bg)
-        self.holes = sc.addPath(QPainterPath(), QPen(Qt.NoPen), QBrush(QColor("#F7BB3B")))
+        self.holes = sc.addPath(QPainterPath(), QPen(Qt.NoPen), QBrush(QColor("#2E7D4F")))
         self.holes.setZValue(2)
         dash = QPen(QColor(120, 200, 255), 0, Qt.DashLine)
         self.decor = sc.addPath(QPainterPath(), dash)
@@ -623,7 +623,7 @@ class Canvas(QGraphicsView):
         self.decor.setPath(path)
         for h in self.handles:
             on = h.ci == sel
-            h.setBrush(QColor(255, 210, 80) if on else QColor(120, 200, 255))
+            h.setBrush(QColor(120, 210, 150) if on else QColor(120, 200, 255))
             h.setPen(QPen(QColor("white" if on else "black"), 1.5))
 
     def zoom_fit(self):
@@ -1071,7 +1071,7 @@ class MainWindow(QMainWindow):
             if n not in ("shape", "diameter", "rotation"):
                 self.dot_form.setRowVisible(w, n in DOT_VIS.get(d.dot.shape, ()))
         self.color_btn.setText(d.dot.color)
-        self.color_btn.setStyleSheet(f"background:{d.dot.color};color:black")
+        self.color_btn.setStyleSheet(f"background:{d.dot.color};color:white")
         self.mode_stack.setCurrentIndex(MODES.index(d.pattern.mode) if d.pattern.mode in MODES else 0)
         # hexagon pitch is derived from spacing_x alone
         self.grid_form.setRowVisible(self.grid_rows["spacing_y"], d.pattern.grid.arrangement != "hexagon")
@@ -1618,7 +1618,7 @@ def dark_theme(app):
     app.setStyleSheet(QSS)
 
 
-ACCENT = "#F7BB3B"
+ACCENT = "#2E7D4F"
 QSS = f"""
 QWidget {{ font-size: 10pt; }}
 QDockWidget::title {{ background:#2a2b2f; padding:8px; font-weight:bold; }}
@@ -1629,10 +1629,10 @@ QToolButton[section="small"] {{ border:none; color:#a8a8b0; padding:4px 2px; }}
 QToolButton[tile="true"] {{ background:#36373c; border:1px solid #3f4046; border-radius:8px; padding:4px;
     font-size:8.5pt; }}
 QToolButton[tile="true"]:hover {{ border-color:#6a6b72; }}
-QToolButton[tile="true"]:checked {{ border:2px solid {ACCENT}; background:#43403a; }}
+QToolButton[tile="true"]:checked {{ border:2px solid {ACCENT}; background:#33433a; }}
 QToolButton[seg="true"] {{ background:#36373c; border:1px solid #45464c; border-radius:6px; padding:5px 8px; }}
-QToolButton[seg="true"]:checked {{ background:{ACCENT}; color:#1b1b1b; font-weight:bold; border-color:{ACCENT}; }}
-QToolButton#export {{ background:{ACCENT}; color:#1b1b1b; font-weight:bold; border-radius:6px; padding:5px 10px; }}
+QToolButton[seg="true"]:checked {{ background:{ACCENT}; color:white; font-weight:bold; border-color:{ACCENT}; }}
+QToolButton#export {{ background:{ACCENT}; color:white; font-weight:bold; border-radius:6px; padding:5px 10px; }}
 QPushButton {{ background:#3a3b40; border:1px solid #4a4b52; border-radius:6px; padding:5px 10px; }}
 QPushButton:hover {{ background:#45464c; }}
 QSlider::groove:horizontal {{ height:4px; background:#4a4b52; border-radius:2px; }}
@@ -1646,7 +1646,7 @@ QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ width:0; border:no
 QAbstractSpinBox:focus, QLineEdit:focus {{ border-color:{ACCENT}; }}
 QTabBar::tab {{ background:#36373c; padding:6px 12px; border-top-left-radius:6px; border-top-right-radius:6px;
     margin-right:2px; }}
-QTabBar::tab:selected {{ background:{ACCENT}; color:#1b1b1b; font-weight:bold; }}
+QTabBar::tab:selected {{ background:{ACCENT}; color:white; font-weight:bold; }}
 QWidget#zoombar {{ background:rgba(40,41,45,220); border:1px solid #4a4b52; border-radius:8px; }}
 QWidget#zoombar QToolButton {{ background:transparent; border:none; font-size:12pt; padding:0 6px; }}
 QWidget#zoombar QToolButton:hover {{ background:#4a4b52; border-radius:5px; }}
