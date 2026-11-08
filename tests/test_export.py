@@ -97,6 +97,8 @@ def test_step_roundtrip_volume(tmp, make, t):
     assert len(sols) == 1
     ex._check(shape, "reimport")  # full BRepCheck when small, else volume/solid checks
     assert ex.volume(shape) == pytest.approx(expected_volume(res, t), rel=0.005)
+    # body named after the file (OCC appends a per-process counter)
+    assert f"PRODUCT('{make.__name__} " in p.read_text(errors="ignore")
 
 
 def test_step_multipart(tmp):

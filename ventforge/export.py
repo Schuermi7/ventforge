@@ -280,8 +280,10 @@ def _write(shape, path, tolerance: float = 0.05):
         from OCP.Interface import Interface_Static
         from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
 
+        w = STEPControl_Writer()  # registers the write.step.* statics, so set them after this
         Interface_Static.SetCVal_s("write.step.unit", "MM")
-        w = STEPControl_Writer()
+        # body name in CAD; OCC's default is "Open CASCADE STEP translator 8.0 1"
+        Interface_Static.SetCVal_s("write.step.product.name", path.stem)
         w.Transfer(shape, STEPControl_AsIs)
         if w.Write(str(path)) != IFSelect_RetDone:
             raise RuntimeError(f"STEP write failed: {path}")
