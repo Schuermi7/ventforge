@@ -44,7 +44,7 @@ META = {  # name: (min, max, step, suffix)
     "star_inner": (0.05, 0.95, 0.05, ""), "aspect": (0.05, 20, 0.05, ""), "noise": (0, 1, 0.05, ""),
     "opacity": (0, 1, 0.05, ""), "offset_x": (-500, 500, 0.5, " mm"), "offset_y": (-500, 500, 0.5, " mm"),
     "turns": (0.1, 200, 0.5, ""), "spread": (0.1, 50, 0.1, ""), "width": (1, 5000, 1, " mm"),
-    "height": (1, 5000, 1, " mm"), "thickness": (0.1, 100, 0.1, " mm"), "diameter": (0.1, 500, 0.1, " mm"),
+    "height": (1, 5000, 1, " mm"), "thickness": (0.1, 100, 0.1, " mm"), "relief_depth": (0.05, 50, 0.05, " mm"), "diameter": (0.1, 500, 0.1, " mm"),
     "kerf": (0, 2, 0.01, " mm"), "tool_radius": (0, 20, 0.05, " mm"), "min_feature": (0, 20, 0.05, " mm"),
 }
 MM_WORDS = ("spacing", "radius", "diameter", "distance", "width", "margin", "size", "amplitude",
@@ -64,7 +64,7 @@ CTRL_VALUE = {"size": 0.3, "spacing": 2.0, "angle": 45.0, "shape": 1.0}
 # Tuned with a sweep of pattern.generate over each slider (non-empty, <5% min-wall overlaps, <250 ms, visible
 # change) on the 100 mm default canvas. Full-path entries win over the name-based SOFT fallback.
 SOFT_PATH = {
-    "canvas.width": (10, 500), "canvas.height": (10, 500), "canvas.thickness": (0.5, 10),
+    "canvas.width": (10, 500), "canvas.height": (10, 500), "canvas.thickness": (0.5, 10), "canvas.relief_depth": (0.2, 3),
     "boundary.corner_radius": (0, 50), "dot.diameter": (0.3, 20), "dot.corner_radius": (0, 3),
     "pattern.grid.offset_x": (-10, 10), "pattern.grid.offset_y": (-10, 10), "pattern.grid.rotation": (-90, 90),
     "pattern.random.count": (5, 1000),

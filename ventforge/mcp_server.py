@@ -255,7 +255,8 @@ def preview(px: int = 900) -> list:
 @mcp.tool()
 def export(path: str) -> dict:
     """Export the current design; format from the extension: .svg .png .dxf .step/.stp .stl (3D plate of
-    canvas.thickness)."""
+    canvas.thickness). canvas.relief "deboss" / "emboss" makes the 3D plate a texture instead: the pattern sunk
+    into or raised on the top by canvas.relief_depth (grips, decorative panels, labels)."""
     from .export import export as do_export
     d = _load()
     r = _generate(d)

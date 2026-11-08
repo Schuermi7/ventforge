@@ -28,7 +28,7 @@ CHOICES = {
     "mode": MODES, "kind": ("point", "line", "curve"),
     "pattern.grid.rotate_by": ("row", "col", "both"),
     "pattern.crosslines.rotate_by": ("left", "right", "both"),
-    "keepouts.shape": ("circle", "rectangle"),
+    "keepouts.shape": ("circle", "rectangle"), "relief": ("through", "deboss", "emboss"),
 }
 # common fan sizes (mm): screw hole spacing, screw hole diameter (M3 clearance up to 60 mm, M4 above)
 FANS = {40: (32.0, 3.4), 50: (40.0, 3.4), 60: (50.0, 3.4), 80: (71.5, 4.3), 92: (82.5, 4.3),
@@ -40,6 +40,8 @@ class Canvas:
     width: float = 100.0
     height: float = 100.0
     thickness: float = 2.0  # plate thickness for 3D exports
+    relief: str = "through"  # 3D: through = holes cut through; deboss = sunk into the top; emboss = raised on top
+    relief_depth: float = 0.6  # mm the pattern is sunk (deboss) or raised (emboss)
 
 
 @dataclass

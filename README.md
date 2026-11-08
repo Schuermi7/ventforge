@@ -19,6 +19,8 @@ MCP server. Both work on the same design file.
 - **Machining:** CNC tool radius (rounds inside corners, drops holes the cutter cannot reach) and laser
   kerf compensation for SVG/DXF. Set a minimum feature (about 2× nozzle for 3D printing) to flag holes
   that would close up.
+- **Textures:** instead of cutting through, sink the pattern into the top (deboss) or raise it (emboss) by
+  a set depth, for grips, decorative panels and labels (Canvas → Relief).
 - **Export:** PNG, SVG, DXF, STEP, STL. You can also wrap the pattern onto a tube or cut it into an
   existing STEP part.
 - **Checks:** hole count, open area, the thinnest wall in mm (marked on the canvas), and warnings where walls
@@ -108,6 +110,30 @@ The assistant works on `~/Documents/VentForge/current.vent.json`. If you open th
 `fit_open_area` (solve a parameter for a target open area), `preview`, `export`,
 `wrap_cylinder`, `cut_into_part`, `open_in_gui`.
 
+## Use it in Autodesk Fusion
+
+VentForge comes with a Fusion add-in. It puts a pattern on any flat face of your part as **one Combine
+feature**, instead of a sketch pattern with thousands of copies that slows Fusion down.
+
+```bash
+pip install "ventforge[cad]"
+ventforge install-fusion
+```
+
+In Fusion, open *Utilities → Add-Ins*, pick **VentForge** and click *Run*. Tick *Run on Startup* to keep
+it. Then use *Solid → Create → VentForge pattern*:
+
+1. Pick a flat face of your part.
+2. Pick a design. The default is the current design of the AI assistant
+   (`~/Documents/VentForge/current.vent.json`). *Edit in VentForge* opens it in the editor.
+3. Set a rotation if you want one, and press OK.
+
+The pattern centre goes on the face centre, with x along the world X axis. *Canvas → Relief* in the
+design decides what happens: **through** cuts through the body, **deboss** cuts the pattern in by the
+relief depth, and **emboss** adds it on top. The add-in runs your VentForge installation, because
+Fusion's own Python has no geometry libraries. Run `ventforge install-fusion` again after you update
+VentForge or move its environment.
+
 ## Project layout
 
 ```
@@ -117,7 +143,8 @@ ventforge/
 ├── export.py        PNG, SVG, DXF, STEP and STL output, tube wrap, cut into part
 ├── gui.py           desktop editor
 ├── mcp_server.py    MCP tools for AI assistants
-├── __main__.py      `ventforge` command (editor, or MCP server with --mcp)
+├── __main__.py      `ventforge` command (editor, --mcp server, tool, install-fusion)
+├── fusion/          Autodesk Fusion add-in, installed by `ventforge install-fusion`
 └── presets/         example designs shipped with the package
 tests/               pytest suite, including a real MCP client/server run
 .github/workflows/   CI on Windows, macOS and Linux; publishes to PyPI on version tags

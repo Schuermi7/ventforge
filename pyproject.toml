@@ -37,3 +37,4 @@ packages = ["ventforge", "ventforge.presets"]  # presets: data-only folder shipp
 
 [tool.setuptools.package-data]
 "ventforge.presets" = ["*.vent.json"]
+"ventforge" = ["fusion/VentForge/*.py", "fusion/VentForge/*.manifest"]  # Fusion add-in, copied by install-fusion

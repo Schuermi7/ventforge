@@ -399,13 +399,77 @@ def _need_cad():
 
 def plate_shape(result: Result, design: Design):
     _need_cad()
-    t = design.canvas.thickness
+    c = design.canvas
+    t, dep = c.thickness, c.relief_depth
+    if c.relief != "through":
+        if dep <= 0 or c.relief == "deboss" and dep >= t:
+            raise ValueError(f"relief_depth must be above 0{' and below the thickness' * (c.relief == 'deboss')}; "
+                             f"got {dep:g} mm (thickness {t:g} mm)")
+        return _relief_shape(result, t, dep, c.relief == "emboss")
     faces, area = _plate_faces(result)
     if not faces:
         raise ValueError("VentForge export: holes cover the whole plate, nothing to build")
     sols = [_tiled_prism(f, t) for f in faces]
     shape = sols[0] if len(sols) == 1 else _compound(sols)
     return _check(shape, "flat plate", area * t)
+
+
+def _relief_shape(result: Result, t: float, dep: float, emboss: bool):
+    """Pattern as a texture instead of holes: deboss = a solid base of t - dep with the holed plate on top
+    (pockets dep deep); emboss = a solid base of t with the holes as dep-high bosses on top.
+    Glue-fusing touching solids is exact and fast: no face-face intersections to compute."""
+    from OCP.BOPAlgo import BOPAlgo_GlueShift
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_Transform
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.collections import List_TopoDS_Shape
+    from OCP.gp import gp_Trsf, gp_Vec
+
+    def lifted(s, z):
+        tr = gp_Trsf()
+        tr.SetTranslation(gp_Vec(0, 0, z))
+        return BRepBuilderAPI_Transform(s, tr, True).Shape()
+
+    base_faces = []
+    for p in _parts(result.outline):
+        mf = BRepBuilderAPI_MakeFace(_occ_wire_poly(_ring_xy(_clean(p).exterior)), True)
+        for ring in _clean(p).interiors:
+            mf.Add(_occ_wire_poly(_ring_xy(ring)))
+        base_faces.append(mf.Face())
+    plate = result.outline.area
+    if emboss:
+        base, top, bosses = t, [], 0.0
+        for poly, circ in _hole_regions(result):
+            mf = BRepBuilderAPI_MakeFace(_occ_wire_circle(*circ, ccw=True) if circ else
+                                         _occ_wire_poly(_ring_xy(poly.exterior)), True)
+            for ring in [] if circ else poly.interiors:
+                mf.Add(_occ_wire_poly(_ring_xy(ring)))
+            top.append(lifted(BRepPrimAPI_MakePrism(mf.Face(), gp_Vec(0, 0, dep)).Shape(), t))
+            bosses += math.pi * circ[2] ** 2 if circ else poly.area
+        expect = plate * t + bosses * dep
+    else:
+        base = t - dep
+        faces, area = _plate_faces(result)
+        top = [lifted(_tiled_prism(f, dep), base) for f in faces]
+        expect = plate * base + area * dep
+    a, tools = List_TopoDS_Shape(), List_TopoDS_Shape()
+    for f in base_faces:
+        a.Append(_tiled_prism(f, base))
+    for s in top:
+        tools.Append(s)
+    if tools.Size() == 0:
+        shape = a.First() if a.Size() == 1 else _compound(list(a))
+    else:
+        op = BRepAlgoAPI_Fuse()
+        op.SetArguments(a)
+        op.SetTools(tools)
+        op.SetGlue(BOPAlgo_GlueShift)
+        op.SetRunParallel(True)
+        op.Build()
+        if not op.IsDone():
+            raise RuntimeError("VentForge export: could not merge the relief onto the plate")
+        shape = op.Shape()
+    return _check(shape, "emboss" if emboss else "deboss", expect)
 
 
 def to_step(result: Result, design: Design, path) -> None:
@@ -512,6 +576,8 @@ def wrap_cylinder(result: Result, design: Design, path, radius=None, wall=None, 
     _need_cad()
     t0 = time.perf_counter()
     c = design.canvas
+    if c.relief != "through":
+        raise ValueError("wrap_cylinder cuts holes through the tube; set canvas.relief to through")
     R = radius or c.width / (2 * math.pi)
     wall = wall or c.thickness
     H = height or c.height
@@ -618,6 +684,44 @@ def cut_into_part(result: Result, design: Design, part_path, out_path, origin=(0
 
 
 # --------------------------------------------------------------------------- dispatch
+LIFT = 0.05  # mm: cutting tools start above the face, bosses sink below it, so CAD booleans never meet coplanar faces
+
+
+def pattern_tools(result: Result, design: Design, path, depth: float | None = None) -> dict:
+    """The pattern as loose solids for a CAD program to combine with its own part (the Fusion 360 add-in):
+    the face sits at z=0 with its outward normal +z. canvas.relief decides what they are:
+    through -> cutters down to -depth (default canvas.thickness), deboss -> cutters down to -relief_depth,
+    emboss -> bosses up to +relief_depth. Returns {"operation": "cut" | "join", "bodies": n}."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_Transform
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.gp import gp_Trsf, gp_Vec
+
+    _need_cad()
+    c = design.canvas
+    if c.relief == "emboss":
+        z0, z1, op = -LIFT, c.relief_depth, "join"
+    else:
+        z0, z1, op = -(c.relief_depth if c.relief == "deboss" else depth or c.thickness), LIFT, "cut"
+    if z1 - z0 <= 2 * LIFT:
+        raise ValueError(f"depth must be above 0; got {z1 - z0 - LIFT:g} mm")
+    tr = gp_Trsf()
+    tr.SetTranslation(gp_Vec(0, 0, z0))
+    bodies = []
+    for poly, circ in _hole_regions(result):
+        mf = BRepBuilderAPI_MakeFace(_occ_wire_circle(*circ, ccw=True) if circ else
+                                     _occ_wire_poly(_ring_xy(poly.exterior)), True)
+        for ring in [] if circ else poly.interiors:
+            mf.Add(_occ_wire_poly(_ring_xy(ring)))
+        prism = BRepPrimAPI_MakePrism(mf.Face(), gp_Vec(0, 0, z1 - z0)).Shape()
+        bodies.append(BRepBuilderAPI_Transform(prism, tr, True).Shape())
+    if not bodies:
+        raise ValueError("the pattern has no holes")
+    _write(_compound(bodies), path)
+    x0, y0, x1, y1 = shapely.union_all(result.holes).bounds
+    # size lets the add-in check the unit conversion of its STEP import
+    return {"operation": op, "bodies": len(bodies), "size_mm": round(max(x1 - x0, y1 - y0), 4)}
+
+
 def cut_paths(result: Result, design: Design) -> Result:
     """Laser/waterjet kerf: the beam centre runs kerf/2 inside each hole and outside the outline, so the cut
     part has the designed size. Holes narrower than the kerf are dropped."""

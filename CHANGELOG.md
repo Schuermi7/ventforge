@@ -3,6 +3,29 @@
 All notable changes to VentForge. Versions follow [semantic versioning](https://semver.org);
 while we are below 1.0, a minor version (0.x.0) may change how something behaves.
 
+## Unreleased
+
+### New: textures instead of holes
+
+- **Deboss and emboss.** Set *Canvas → Relief* to *deboss* to sink the pattern into the top of the
+  plate, or to *emboss* to raise it, by *Relief depth* (default 0.6 mm). Use it for grip surfaces,
+  knurl-like textures, decorative panels and labels. STEP and STL exports give one clean solid, with
+  exact circles kept as arcs, about as fast as a plain plate (around 1 s for 2000 holes).
+- A slot that would cut the plate in two becomes a groove, so the part stays in one piece.
+- *Wrap onto cylinder* still cuts through and says so when a relief is set.
+
+### New: Autodesk Fusion add-in
+
+- **Put a pattern on a face of your part in Fusion.** Run `ventforge install-fusion` once, then use
+  *Solid → Create → VentForge pattern*. Pick a flat face and a design, set a rotation, and press OK.
+  The pattern is added as **one Combine feature** (cut, or join for emboss) on the timeline, so Fusion
+  stays fast even with thousands of holes. Big sketch patterns are the most common complaint about
+  vent grilles in Fusion.
+- It uses the AI assistant's current design by default, so you can design with the assistant and
+  place the result in Fusion right away. *Edit in VentForge* opens the design in the editor.
+- New command `ventforge tool design.vent.json out.step` writes the pattern as separate solids for
+  other CAD programs and scripts.
+
 ## 0.2.0 — 2026-11-09
 
 This release turns VentForge from "a pattern on a plate" into a tool that knows about the part you

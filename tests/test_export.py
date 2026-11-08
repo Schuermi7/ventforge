@@ -194,3 +194,49 @@ def test_cut_into_part(tmp, monkeypatch, tiled):
 def test_export_rejects_unknown(tmp):
     with pytest.raises(ValueError):
         ex.export(hex_result(4), design(), tmp / "x.obj")
+
+
+@pytest.mark.parametrize("relief,sign", [("deboss", -1), ("emboss", 1)])
+@pytest.mark.parametrize("make", [hex_result, circle_result, tricky_result])
+def test_relief_is_one_solid_with_exact_volume(tmp, make, relief, sign):
+    res, d = make(), design(2.0)
+    d.canvas.relief, d.canvas.relief_depth = relief, 0.6
+    p = tmp / f"{relief}_{make.__name__}.step"
+    ex.to_step(res, d, p)
+    shape = ex.read_step(p)
+    assert len(ex.solids(shape)) == 1
+    holes = shapely.union_all(res.holes).intersection(res.outline).area
+    assert ex.volume(shape) == pytest.approx(res.outline.area * 2.0 + sign * holes * 0.6, rel=0.005)
+
+
+def test_relief_keeps_a_slotted_plate_in_one_piece(tmp):
+    d = design(2)
+    d.canvas.relief = "deboss"
+    shape = ex.plate_shape(_result([box(-1, -60, 1, 60)], box(-50, -50, 50, 50)), d)
+    assert len(ex.solids(shape)) == 1  # the slot is a groove now, not a cut
+
+
+def test_relief_rejects_bad_depth_and_tube(tmp):
+    d = design(2)
+    d.canvas.relief, d.canvas.relief_depth = "deboss", 2.0
+    with pytest.raises(ValueError, match="below the thickness"):
+        ex.plate_shape(circle_result(4), d)
+    d.canvas.relief_depth = 0
+    with pytest.raises(ValueError, match="above 0"):
+        ex.plate_shape(circle_result(4), d)
+    d.canvas.relief, d.canvas.relief_depth = "emboss", 0.5
+    with pytest.raises(ValueError, match="through"):
+        ex.wrap_cylinder(circle_result(4), d, tmp / "w.step")
+
+
+@pytest.mark.parametrize("relief,op,z", [("through", "cut", (-5, ex.LIFT)), ("deboss", "cut", (-0.6, ex.LIFT)),
+                                         ("emboss", "join", (-ex.LIFT, 0.6))])
+def test_pattern_tools_for_cad_addins(tmp, relief, op, z):
+    res, d = circle_result(9), design(2.0)
+    d.canvas.relief, d.canvas.relief_depth = relief, 0.6
+    p = tmp / f"tools_{relief}.step"
+    info = ex.pattern_tools(res, d, p, depth=5)
+    assert info == {"operation": op, "bodies": 9, "size_mm": pytest.approx(11.0)}  # 3x3 at 4 mm pitch, d 3
+    shape = ex.read_step(p)
+    assert len(ex.solids(shape)) == 9
+    assert ex.volume(shape) == pytest.approx(9 * math.pi * 1.5 ** 2 * (z[1] - z[0]), rel=0.005)
