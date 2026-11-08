@@ -1,0 +1,136 @@
+"""Offscreen smoke test of the GUI: presets, edits, undo/redo, save, live reload, screenshot."""
+import json
+import os
+import time
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if os.name == "nt":  # offscreen platform finds no fonts on its own
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.expandvars(r"%WINDIR%\Fonts"))
+
+import pytest
+from PySide6.QtWidgets import QApplication
+
+from ventforge import gui
+from ventforge.model import MODES, Design
+
+OUT = Path(__file__).parent / "out"
+
+
+def wait(cond, timeout=20.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        QApplication.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+@pytest.fixture
+def win(tmp_path, monkeypatch):
+    monkeypatch.setattr(gui.QSettings, "value", lambda self, k, default=None: str(tmp_path / "lib"))
+    app = QApplication.instance() or QApplication([])
+    gui.dark_theme(app)
+    w = gui.MainWindow()
+    w.show()
+    yield w
+    w.dirty = False
+    w.close()
+    w.deleteLater()
+    QApplication.processEvents()
+
+
+def settle(w):
+    assert wait(w.idle), "regeneration did not finish"
+    assert w.result is not None
+
+
+def test_gui_smoke(win, tmp_path):
+    w = win
+    settle(w)
+    assert w.result.stats["count"] > 0
+
+    # every preset loads and generates
+    presets = sorted(gui.PRESETS.glob("*.vent.json"))
+    for p in presets:
+        assert w.open_file(str(p), template=True)
+        settle(w)
+    assert w.lib_list.count() >= len(presets)
+
+    # every mode generates
+    w.set_design(Design())
+    for m in MODES:
+        w.set_param("pattern.mode", m)
+        settle(w)
+        assert w.mode_stack.currentIndex() == MODES.index(m)
+        assert "Generate failed" not in w.statusBar().currentMessage(), m
+    w.set_param("pattern.mode", "grid")
+    w.commit()
+
+    # param edits through widgets + undo/redo
+    spin = next(wd for p, wd in w.bindings if p == "dot.diameter")
+    spin.setValue(3.0)
+    w.commit()
+    w.set_param("pattern.grid.spacing_x", 8.0)
+    w.commit()
+    settle(w)
+    assert w.design.pattern.grid.spacing_x == 8.0
+    w.undo()
+    assert w.design.pattern.grid.spacing_x == 6.0 and w.design.dot.diameter == 3.0
+    w.undo()
+    assert w.design.dot.diameter == 4.0
+    w.redo()
+    w.redo()
+    assert w.design.pattern.grid.spacing_x == 8.0
+    settle(w)
+
+    # gradient control + dragging a handle
+    w.add_control("size", "point")
+    assert len(w.canvas.handles) == 1
+    w.canvas.handles[0].setPos(gui.S(10, 5))
+    assert w.design.gradients.size.controls[0].points[0] == [10.0, 5.0]
+    w.randomize()
+    settle(w)
+    w.set_custom_boundary([[-40, -40], [40, -40], [0, 45]])
+    settle(w)
+    assert w.design.boundary.type == "custom"
+
+    # save, then edit the file externally -> live reload, own write ignored
+    f = tmp_path / "t.vent.json"
+    assert w.save_to(str(f))
+    wait(lambda: False, 0.5)  # let the watcher fire for our own write
+    assert not w.dirty
+    zoom = w.canvas.transform().m11()
+    d = Design.load(f)
+    d.dot.diameter = 2.5
+    d.save(f)  # atomic replace, like the MCP server
+    assert wait(lambda: w.design.dot.diameter == 2.5, 5), "live reload did not happen"
+    assert w.canvas.transform().m11() == zoom
+    settle(w)
+
+    # json still valid on disk
+    assert json.loads(f.read_text())["dot"]["diameter"] == 2.5
+
+    # editor edits are autosaved, so an MCP edit never starts from a stale file
+    w.set_param("dot.diameter", 3.5)
+    assert wait(lambda: json.loads(f.read_text())["dot"]["diameter"] == 3.5, 5), "edit not autosaved"
+    assert not w.dirty
+
+    # exports run in a worker
+    for ext in (".svg", ".png", ".dxf"):
+        out = tmp_path / f"e{ext}"
+        w.run_export(lambda r, d, out=out: gui.exporter().export(r, d, out), str(out))
+        assert wait(lambda: not w.tasks, 60) and out.stat().st_size > 0, ext
+
+    # screenshot of a nice design
+    w.open_file(str(presets[0]) if presets else str(f), template=True)
+    w.add_control("size", "point")
+    settle(w)
+    OUT.mkdir(exist_ok=True)
+    w.resize(1500, 920)
+    QApplication.processEvents()
+    w.canvas.zoom_fit()
+    QApplication.processEvents()
+    assert w.grab().save(str(OUT / "gui.png"))
+    assert w.canvas.grab().save(str(OUT / "canvas.png"))

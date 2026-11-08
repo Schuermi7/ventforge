@@ -1,0 +1,174 @@
+{
+  "name": "Spiral dashes",
+  "canvas": {
+    "width": 120.0,
+    "height": 120.0,
+    "thickness": 2.0
+  },
+  "boundary": {
+    "type": "circle",
+    "corner_radius": 10.0,
+    "margin": 3.0,
+    "points": [],
+    "clip": false
+  },
+  "dot": {
+    "shape": "rounded_rectangle",
+    "diameter": 4.0,
+    "aspect": 0.5,
+    "corner_radius": 0.9,
+    "sides": 6,
+    "star_points": 5,
+    "star_inner": 0.5,
+    "rotation": 0.0,
+    "custom_points": [],
+    "color": "#F7BB3B"
+  },
+  "pattern": {
+    "mode": "spiral",
+    "grid": {
+      "arrangement": "diamond",
+      "spacing_x": 6.0,
+      "spacing_y": 6.0,
+      "offset_x": 0.0,
+      "offset_y": 0.0,
+      "rotation": 0.0,
+      "row_rotation": 0.0,
+      "rotate_by": "row"
+    },
+    "random": {
+      "count": 300,
+      "min_distance": 5.0,
+      "seed": 1
+    },
+    "path": {
+      "points": [],
+      "closed": true,
+      "smooth": true,
+      "count": 60,
+      "layers": 1,
+      "layer_spacing": 6.0,
+      "align": true
+    },
+    "spiral": {
+      "radius": 54.0,
+      "turns": 8.0,
+      "inner_radius": 4.0,
+      "count": 300,
+      "rotation": 0.0,
+      "even_spacing": true,
+      "align": true
+    },
+    "concentric": {
+      "ring_spacing": 6.0,
+      "dot_spacing": 6.0,
+      "inner_radius": 0.0,
+      "outer_radius": 0.0,
+      "rotation": 0.0,
+      "stagger": true,
+      "align": true
+    },
+    "fibonacci": {
+      "count": 400,
+      "spread": 2.2,
+      "inner_radius": 0.0,
+      "rotation": 0.0,
+      "align": false
+    },
+    "crosslines": {
+      "left_angle": 60.0,
+      "right_angle": 120.0,
+      "left_spacing": 6.0,
+      "right_spacing": 6.0,
+      "rotation": 0.0,
+      "row_rotation": 0.0,
+      "rotate_by": "both"
+    },
+    "voronoi": {
+      "cell_size": 8.0,
+      "irregularity": 60.0,
+      "crack_width": 1.2,
+      "corner_radius": 0.5,
+      "rotation": 0.0,
+      "seed": 1
+    },
+    "flowlines": {
+      "line_spacing": 5.0,
+      "line_width": 2.0,
+      "rotation": 0.0,
+      "edge_style": "round",
+      "follow_boundary": false,
+      "invert": false,
+      "amplitude": 3.0,
+      "wavelength": 30.0,
+      "seed": 1
+    },
+    "custom_points": {
+      "points": [],
+      "sizes": [],
+      "angles": []
+    }
+  },
+  "gradients": {
+    "size": {
+      "enabled": false,
+      "controls": [],
+      "edge": 1.0,
+      "falloff": "smooth",
+      "noise": 0.0,
+      "noise_scale": 20.0,
+      "noise_seed": 1,
+      "image": "",
+      "image_min": 0.2,
+      "image_max": 1.0,
+      "invert_image": false
+    },
+    "spacing": {
+      "enabled": false,
+      "controls": [],
+      "edge": 1.0,
+      "falloff": "smooth",
+      "noise": 0.0,
+      "noise_scale": 20.0,
+      "noise_seed": 1,
+      "image": "",
+      "image_min": 0.2,
+      "image_max": 1.0,
+      "invert_image": false
+    },
+    "angle": {
+      "enabled": false,
+      "controls": [],
+      "edge": 0.0,
+      "falloff": "smooth",
+      "noise": 0.0,
+      "noise_scale": 20.0,
+      "noise_seed": 1,
+      "image": "",
+      "image_min": 0.2,
+      "image_max": 1.0,
+      "invert_image": false
+    },
+    "shape": {
+      "enabled": false,
+      "controls": [],
+      "edge": 0.0,
+      "falloff": "smooth",
+      "noise": 0.0,
+      "noise_scale": 20.0,
+      "noise_seed": 1,
+      "image": "",
+      "image_min": 0.2,
+      "image_max": 1.0,
+      "invert_image": false
+    },
+    "target_shape": "star",
+    "target_sides": 4
+  },
+  "background": {
+    "image": "",
+    "opacity": 0.5
+  },
+  "min_wall": 0.8,
+  "version": 1
+}

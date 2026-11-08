@@ -1,0 +1,28 @@
+[project]
+name = "ventforge"
+version = "0.1.0"
+description = "Parametric vent pattern designer with native GUI and MCP server"
+readme = "README.md"
+requires-python = ">=3.11"
+# core: geometry, SVG/DXF/PNG export and the MCP server
+dependencies = ["numpy", "shapely>=2", "ezdxf", "pillow", "mcp>=2,<3"]
+
+[project.optional-dependencies]
+gui = ["PySide6-Essentials>=6.5"]           # desktop editor (QtCore/QtGui/QtWidgets only)
+cad = ["cadquery-ocp-novtk>=8.0,<8.1"]      # OpenCascade: STEP/STL, tube wrap, cut into part
+all = ["ventforge[gui,cad]"]
+dev = ["ventforge[all]", "pytest"]
+
+[project.scripts]
+ventforge = "ventforge.__main__:run"        # editor; `ventforge --mcp` runs the MCP server
+ventforge-mcp = "ventforge.mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["ventforge", "ventforge.presets"]  # presets: data-only folder shipped in the wheel
+
+[tool.setuptools.package-data]
+"ventforge.presets" = ["*.vent.json"]
