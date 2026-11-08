@@ -133,9 +133,10 @@ def test_png_size_and_speed(tmp):
     assert dt < 0.5, dt
 
 
-@pytest.mark.parametrize("make,limit", [(circle_result, 3.0), (hex_result, 10.0)])
+@pytest.mark.parametrize("make,limit", [(circle_result, 9.0), (hex_result, 30.0)])
 def test_flat_step_perf(tmp, make, limit):
-    # hexes: ~1.5 s build + ~5.5 s OCC STEP writer (linear floor, 12k side faces)
+    # hexes: ~1.5 s build + ~5.5 s OCC STEP writer (linear floor, 12k side faces);
+    # limits x3 for slow CI runners, still far below the old 41 s+ regressions
     res = make()
     t0 = time.perf_counter()
     ex.to_step(res, design(), tmp / "perf.step")
