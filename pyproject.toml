@@ -3,6 +3,17 @@ name = "ventforge"
 version = "0.1.0"
 description = "Parametric vent pattern designer with native GUI and MCP server"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+keywords = ["vent", "pattern", "3d-printing", "cnc", "cad", "mcp", "parametric"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Topic :: Multimedia :: Graphics :: Editors :: Vector-Based",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 requires-python = ">=3.11"
 # core: geometry, SVG/DXF/PNG export and the MCP server
 dependencies = ["numpy", "shapely>=2", "ezdxf", "pillow", "mcp>=2,<3"]
@@ -18,7 +29,7 @@ ventforge = "ventforge.__main__:run"        # editor; `ventforge --mcp` runs the
 ventforge-mcp = "ventforge.mcp_server:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # SPDX `license` string
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

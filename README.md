@@ -47,3 +47,7 @@ with that file open reloads live, so you can watch the AI design. `open_in_gui` 
 `gui.py` editor · `mcp_server.py` MCP tools · `presets/` (shipped in the package) · `tests/` (`pytest`, 109 tests, including the MCP server over real stdio;
 GUI test needs `QT_QPA_PLATFORM=offscreen`). Development: `pip install -e ".[dev]"`.
 CI (`.github/workflows/ci.yml`) tests Windows/macOS/Linux and publishes to PyPI on a `v*` tag.
+
+## Licence
+
+GPL-3.0-or-later, see `LICENSE`. You may use, change and sell VentForge; versions you distribute must stay open source under the same licence.
