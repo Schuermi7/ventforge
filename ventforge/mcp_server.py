@@ -115,8 +115,8 @@ def set_params(patch: dict) -> dict:
 def add_control(target: str, kind: str = "point", points: list[list[float]] | None = None,
                 value: float = 0.2, radius: float = 50.0, enable: bool = True) -> dict:
     """Add a gradient control to target size|spacing|angle|shape. kind point (1 point), line (2), curve (>=3)."""
-    if target not in ("size", "spacing", "angle", "shape"):
-        raise ValueError(f"target must be size, spacing, angle or shape; got {target!r}")
+    if target not in model.GRADS:
+        raise ValueError(f"target must be one of {', '.join(model.GRADS)}; got {target!r}")
     if kind not in model.CHOICES["kind"]:
         raise ValueError(f"kind must be point, line or curve; got {kind!r}")
     d = _load()
@@ -132,8 +132,8 @@ def add_control(target: str, kind: str = "point", points: list[list[float]] | No
 def clear_controls(target: str) -> dict:
     """Remove all controls of gradient target size|spacing|angle|shape."""
     d = _load()
-    if target not in ("size", "spacing", "angle", "shape"):
-        raise ValueError(f"target must be size, spacing, angle or shape; got {target!r}")
+    if target not in model.GRADS:
+        raise ValueError(f"target must be one of {', '.join(model.GRADS)}; got {target!r}")
     getattr(d.gradients, target).controls.clear()
     d.save(_path())
     return {"stats": _stats(_generate(d))}

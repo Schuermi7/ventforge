@@ -23,10 +23,9 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QButtonGroup, QCh
                                QSizePolicy, QSlider, QSpinBox, QStackedWidget, QStyle, QTabWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .model import (CHOICES, MODES, SHAPES, Control, Design, DotStyle, Gradient, Pattern)
+from .model import (CHOICES, GRADS, MODES, SHAPES, Control, Design, DotStyle, Gradient, Pattern)
 
 PRESETS = Path(__file__).resolve().parent / "presets"
-GRADS = ("size", "spacing", "angle", "shape")
 
 
 def pattern():  # imported lazily so the GUI module loads even while pattern.py is missing

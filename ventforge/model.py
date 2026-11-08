@@ -18,6 +18,7 @@ MODES = ("grid", "random", "path", "spiral", "concentric", "fibonacci",
          "crosslines", "voronoi", "flowlines", "custom_points")
 BOUNDARIES = ("none", "circle", "rounded_rectangle", "custom")
 TARGET_SHAPES = ("circle", "rectangle", "polygon", "star")
+GRADS = ("size", "spacing", "angle", "shape")  # the fields of Gradients that are gradients
 # allowed values of text fields, by full path or (fallback) field name; used by the GUI, the MCP
 # server and _build, which rejects anything else
 CHOICES = {
@@ -234,15 +235,16 @@ class Design:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Design":
-        return _build(cls, d)
+    def from_dict(cls, d: dict, strict: bool = True) -> "Design":
+        """strict: reject unknown text values; else drop them so the default applies (old files)."""
+        return _build(cls, d, strict=strict)
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
     def load(cls, path: str | Path) -> "Design":
-        d = cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+        d = cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")), strict=False)
         return d.resolve_images(Path(path).resolve().parent)
 
     def resolve_images(self, base: str | Path) -> "Design":
@@ -287,7 +289,7 @@ def _merge(base: dict, patch: dict, path: str = "") -> dict:
     return out
 
 
-def _build(cls, d: dict, path: str = ""):
+def _build(cls, d: dict, path: str = "", strict: bool = True):
     hints = get_type_hints(cls)
     kw = {}
     for f in fields(cls):
@@ -295,9 +297,9 @@ def _build(cls, d: dict, path: str = ""):
             continue
         t, v, p = hints[f.name], d[f.name], path + f.name
         if is_dataclass(t):
-            kw[f.name] = _build(t, v or {}, p + ".")
+            kw[f.name] = _build(t, v or {}, p + ".", strict)
         elif getattr(t, "__origin__", None) is list and t.__args__[0] is Control:
-            kw[f.name] = [_build(Control, c, p + ".") for c in v]
+            kw[f.name] = [_build(Control, c, p + ".", strict) for c in v]
         elif t is float:
             kw[f.name] = float(v)
         elif t is int:
@@ -305,6 +307,8 @@ def _build(cls, d: dict, path: str = ""):
         else:
             opts = CHOICES.get(p) or (CHOICES.get(f.name) if t is str else None)
             if opts and v not in opts:
+                if not strict:
+                    continue
                 raise ValueError(f"{p} must be one of {', '.join(opts)}; got {v!r}")
             kw[f.name] = v
     return cls(**kw)

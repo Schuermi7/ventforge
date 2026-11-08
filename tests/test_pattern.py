@@ -305,6 +305,14 @@ def test_unknown_choice_rejected():
         Design().patched({"pattern": {"crosslines": {"rotate_by": "row"}}})
 
 
+def test_old_file_with_bad_choice_still_loads(tmp_path):
+    # 0.1.0 advertised row/col for crosslines; such files must open, falling back to the default
+    p = tmp_path / "old.vent.json"
+    p.write_text('{"pattern": {"mode": "crosslines", "crosslines": {"rotate_by": "row"}}}')
+    d = Design.load(p)
+    assert d.pattern.crosslines.rotate_by == "both" and d.pattern.mode == "crosslines"
+
+
 def test_fibonacci_even_density_with_hole():
     d = Design().patched({"canvas": {"width": 200, "height": 200}, "dot": {"diameter": 1},
                           "pattern": {"mode": "fibonacci", "fibonacci": {

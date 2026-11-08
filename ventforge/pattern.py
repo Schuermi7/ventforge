@@ -141,12 +141,12 @@ def _falloff(t, kind):
     return t if kind == "linear" else t * t * (3 - 2 * t)
 
 
-@functools.lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=4)
 def _gray(path: str, mtime: float):
     """Decoded grayscale image 0..1; cached so slider drags don't re-decode big photos."""
     from PIL import Image
     with Image.open(path) as im:
-        return np.asarray(im.convert("L"), dtype=np.float64) / 255.0
+        return np.asarray(im.convert("L"), dtype=np.float32) / np.float32(255)
 
 
 def _image_field(g: Gradient, xy, canvas: Canvas):

@@ -170,7 +170,10 @@ def _box_step(path, lx, ly, lz):
     ex._write(BRepPrimAPI_MakeBox(gp_Pnt(-lx / 2, -ly / 2, 0), lx, ly, lz).Shape(), path)
 
 
-def test_cut_into_part(tmp):
+@pytest.mark.parametrize("tiled", [False, True])
+def test_cut_into_part(tmp, monkeypatch, tiled):
+    if tiled:  # force the split-cut-merge path that big vents (> UNTILED_MAX holes) take
+        monkeypatch.setattr(ex, "UNTILED_MAX", 0)
     _box_step(tmp / "box.step", 120, 120, 10)
     pts = _grid(10, 8.0)
     res = _result([Point(x, y).buffer(2, 64) for x, y in pts] + [_hex(0, 0, 3)],
