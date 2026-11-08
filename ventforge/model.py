@@ -6,6 +6,7 @@ The GUI flips y for display. All angles are degrees, counter-clockwise.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
@@ -27,7 +28,11 @@ CHOICES = {
     "mode": MODES, "kind": ("point", "line", "curve"),
     "pattern.grid.rotate_by": ("row", "col", "both"),
     "pattern.crosslines.rotate_by": ("left", "right", "both"),
+    "keepouts.shape": ("circle", "rectangle"),
 }
+# common fan sizes (mm): screw hole spacing, screw hole diameter (M3 clearance up to 60 mm, M4 above)
+FANS = {40: (32.0, 3.4), 50: (40.0, 3.4), 60: (50.0, 3.4), 80: (71.5, 4.3), 92: (82.5, 4.3),
+        120: (105.0, 4.3), 140: (124.5, 4.3)}
 
 
 @dataclass
@@ -44,6 +49,7 @@ class Boundary:
     margin: float = 2.0           # min distance from holes to the boundary edge
     points: list[Pt] = field(default_factory=list)  # custom outline polygon
     clip: bool = False            # False: drop holes crossing the edge; True: clip them
+    vent_diameter: float = 0.0    # > 0: holes only inside this centred circle (a fan's opening)
 
 
 @dataclass
@@ -213,6 +219,25 @@ class Gradients:
 
 
 @dataclass
+class Keepout:
+    """An area without vent holes (screw, standoff, logo); hole=True also cuts it (a screw hole)."""
+    shape: str = "circle"         # circle | rectangle
+    x: float = 0.0                # centre
+    y: float = 0.0
+    width: float = 4.0            # diameter for a circle
+    height: float = 4.0           # rectangle only
+    clearance: float = 1.5        # extra free ring around it
+    hole: bool = False
+
+
+@dataclass
+class Machining:
+    tool_radius: float = 0.0      # CNC: hole corners rounded to the end mill; holes it cannot enter are dropped
+    kerf: float = 0.0             # laser/waterjet cut width: SVG/DXF paths are offset by kerf/2 so parts come out true
+    min_feature: float = 0.0      # 3D print / cutting: holes narrower than this are flagged (print: about 2x nozzle)
+
+
+@dataclass
 class Background:
     image: str = ""                # reference image shown under the pattern (GUI only)
     opacity: float = 0.5
@@ -227,6 +252,8 @@ class Design:
     pattern: Pattern = field(default_factory=Pattern)
     gradients: Gradients = field(default_factory=Gradients)
     background: Background = field(default_factory=Background)
+    keepouts: list[Keepout] = field(default_factory=list)
+    machining: Machining = field(default_factory=Machining)
     min_wall: float = 0.8          # holes closer than this are flagged in stats
     version: int = 1
 
@@ -265,7 +292,7 @@ class Design:
                 img = Path(g["image"])
                 if img.is_absolute() and img.resolve().is_relative_to(base):
                     g["image"] = img.resolve().relative_to(base).as_posix()
-        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # own name per process: GUI and MCP save the same file
         tmp.write_text(json.dumps(d, indent=2), encoding="utf-8")
         for i in range(6):  # atomic replace, so a watching GUI never reads half a file
             try:
@@ -278,6 +305,21 @@ class Design:
     def patched(self, patch: dict) -> "Design":
         """Deep-merge a partial dict, e.g. {"dot": {"diameter": 3}}. Unknown keys raise."""
         return Design.from_dict(_merge(self.to_dict(), patch))
+
+
+def fan_grille(d: Design, size: int) -> Design:
+    """Plate for a standard fan: square canvas, rounded corners, holes only over the blades, 4 screw holes."""
+    if size not in FANS:
+        raise ValueError(f"fan size must be one of {', '.join(map(str, FANS))} mm; got {size!r}")
+    pitch, screw = FANS[size]
+    d.canvas.width = d.canvas.height = float(size)
+    d.boundary.type, d.boundary.corner_radius, d.boundary.margin = "rounded_rectangle", round(size * 0.07, 1), 1.0
+    d.boundary.vent_diameter = size - 3.0
+    d.keepouts = [Keepout(x=sx * pitch / 2, y=sy * pitch / 2, width=screw, hole=True)
+                  for sx in (-1, 1) for sy in (-1, 1)]
+    if d.name == "Untitled":
+        d.name = f"{size} mm fan grille"
+    return d
 
 
 def _merge(base: dict, patch: dict, path: str = "") -> dict:
@@ -297,9 +339,17 @@ def _build(cls, d: dict, path: str = "", strict: bool = True):
             continue
         t, v, p = hints[f.name], d[f.name], path + f.name
         if is_dataclass(t):
+            if v is not None and not isinstance(v, dict):
+                raise ValueError(f"{p} must be an object like {{\"key\": value}}; got {v!r}")
             kw[f.name] = _build(t, v or {}, p + ".", strict)
-        elif getattr(t, "__origin__", None) is list and t.__args__[0] is Control:
-            kw[f.name] = [_build(Control, c, p + ".", strict) for c in v]
+        elif t is bool:
+            if not isinstance(v, bool):  # bool("false") is True: never guess
+                if not strict:
+                    continue
+                raise ValueError(f"{p} must be true or false; got {v!r}")
+            kw[f.name] = v
+        elif getattr(t, "__origin__", None) is list and is_dataclass(t.__args__[0]):
+            kw[f.name] = [_build(t.__args__[0], c, p + ".", strict) for c in v]
         elif t is float:
             kw[f.name] = float(v)
         elif t is int:

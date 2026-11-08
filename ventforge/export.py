@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import shapely
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 from shapely.geometry.polygon import orient
 from shapely.strtree import STRtree
 
@@ -618,14 +618,35 @@ def cut_into_part(result: Result, design: Design, part_path, out_path, origin=(0
 
 
 # --------------------------------------------------------------------------- dispatch
+def cut_paths(result: Result, design: Design) -> Result:
+    """Laser/waterjet kerf: the beam centre runs kerf/2 inside each hole and outside the outline, so the cut
+    part has the designed size. Holes narrower than the kerf are dropped."""
+    k = design.machining.kerf / 2
+    if k <= 0:
+        return result
+    holes, circles = [], []
+    for i, h in enumerate(result.holes):
+        c = _circle(result, i)
+        if c:
+            if c[2] > k:
+                holes.append(h)
+                circles.append((c[0], c[1], c[2] - k))
+            continue
+        for p in _parts(h.buffer(-k, join_style="mitre")):
+            holes.append(p)
+            circles.append(None)
+    return Result(holes=holes, outline=result.outline.buffer(k, join_style="mitre"), stats=result.stats,
+                  circles=circles)
+
+
 def export(result: Result, design: Design, path) -> None:
     ext = Path(path).suffix.lower()
     if ext == ".svg":
-        to_svg(result, design, path)
+        to_svg(cut_paths(result, design), design, path)
     elif ext == ".png":
         to_png(result, design, path)
     elif ext == ".dxf":
-        to_dxf(result, path)
+        to_dxf(cut_paths(result, design), path)
     elif ext in (".step", ".stp"):
         to_step(result, design, path)
     elif ext == ".stl":

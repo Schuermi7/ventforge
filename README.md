@@ -12,10 +12,20 @@ MCP server. Both work on the same design file.
 - **Gradients:** vary size, spacing, angle or shape across the plate. Drive them with points, lines or
   curves, with noise, or with a grayscale image.
 - **Boundary:** none, circle, rounded rectangle, or a drawn outline, with margin and clipping.
+- **Fan grilles:** one click for a 40–140 mm fan: holes only over the blades, 4 screw holes, and the
+  share of the fan opening left open (airflow).
+- **Keep-outs:** circles or rectangles that stay free of holes (bosses, logos, screws), optionally cut as holes.
+  Draw them on the canvas with the Keep-out tool (K; Shift for a circle, right-click to remove).
+- **Machining:** CNC tool radius (rounds inside corners, drops holes the cutter cannot reach) and laser
+  kerf compensation for SVG/DXF. Set a minimum feature (about 2× nozzle for 3D printing) to flag holes
+  that would close up.
 - **Export:** PNG, SVG, DXF, STEP, STL. You can also wrap the pattern onto a tube or cut it into an
   existing STEP part.
-- **Checks:** hole count, open area, and warnings where walls get thinner than your minimum.
-- Undo/redo, presets, and a personal library.
+- **Checks:** hole count, open area, the thinnest wall in mm (marked on the canvas), and warnings where walls
+  get thinner than your minimum.
+- **Airflow estimate:** pressure loss of the grille (Idelchik thin perforated plate) at 2 m/s, so two designs
+  can be compared by airflow. A rough figure, not a flow simulation.
+- Undo/redo, presets, and a personal library (also from the AI assistant: `save_to_library`).
 
 ## Install
 
@@ -93,8 +103,9 @@ edges, and export it as STEP."*
 The assistant works on `~/Documents/VentForge/current.vent.json`. If you open that file in the editor
 (or ask the assistant to "open it in the GUI"), you can watch the design change live.
 
-**Tools the server offers:** `new_design`, `open_design`, `list_presets`, `get_design`,
-`describe_parameters`, `set_params`, `add_control`, `clear_controls`, `preview`, `export`,
+**Tools the server offers:** `new_design`, `open_design`, `list_presets`, `save_to_library`, `get_design`,
+`describe_parameters`, `set_params`, `add_control`, `clear_controls`, `fan_grille`,
+`fit_open_area` (solve a parameter for a target open area), `preview`, `export`,
 `wrap_cylinder`, `cut_into_part`, `open_in_gui`.
 
 ## Project layout

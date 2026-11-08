@@ -1,3 +1,4 @@
+import pytest
 """Runs the MCP server over real stdio, the way Claude talks to it."""
 import asyncio
 
@@ -10,3 +11,84 @@ def test_mcp_server_end_to_end(tmp_path):
     for ext in ("svg", "dxf", "step", "stl"):
         assert (tmp_path / f"e2e.{ext}").stat().st_size > 0
     assert (tmp_path / "e2e_tube.step").stat().st_size > 0
+
+
+def test_bad_patch_leaves_file_untouched(tmp_path):
+    import pytest
+    from ventforge import mcp_server as m
+    p = tmp_path / "d.vent.json"
+    m.new_design(path=str(p))
+    before = p.read_bytes()
+    with pytest.raises(ValueError):
+        m.set_params({"dot": {"shape": "blob"}})
+    assert p.read_bytes() == before
+
+
+def test_set_params_keeps_an_edit_saved_meanwhile(tmp_path, monkeypatch):
+    """The editor saving while set_params generates must not be overwritten."""
+    import os
+    from ventforge import mcp_server as m
+    from ventforge.model import Design
+    p = tmp_path / "d.vent.json"
+    m.new_design(path=str(p))
+    real, calls = m._generate, []
+
+    def generate_while_editor_saves(d):
+        if not calls:
+            e = Design.load(p)
+            e.dot.diameter = 2.5
+            e.save(p)
+            os.utime(p, ns=(p.stat().st_atime_ns, p.stat().st_mtime_ns + 10**9))  # coarse clocks
+        calls.append(1)
+        return real(d)
+
+    monkeypatch.setattr(m, "_generate", generate_while_editor_saves)
+    m.set_params({"canvas": {"width": 140}})
+    d = Design.load(p)
+    assert d.dot.diameter == 2.5 and d.canvas.width == 140
+
+
+def test_fit_open_area_hits_target(tmp_path):
+    from ventforge import mcp_server as m
+    m.new_design(path=str(tmp_path / "f.vent.json"))
+    out = m.fit_open_area(0.3)
+    assert abs(out["stats"]["open_area_ratio"] - 0.3) < 0.01
+    assert m.get_design()["design"]["dot"]["diameter"] == out["dot.diameter"]
+
+
+def test_fit_open_area_refuses_unreachable_target(tmp_path):
+    from ventforge import mcp_server as m
+    m.new_design(path=str(tmp_path / "f.vent.json"))
+    before = (tmp_path / "f.vent.json").read_text()
+    with pytest.raises(ValueError, match="outside"):
+        m.fit_open_area(0.3, low=0.5, high=0.6)
+    with pytest.raises(ValueError, match="ratio"):
+        m.fit_open_area(30)
+    with pytest.raises(ValueError, match="unknown parameter"):
+        m.fit_open_area(0.3, param="dot.nope")
+    assert (tmp_path / "f.vent.json").read_text() == before
+
+
+def test_fan_grille_tool_saves_and_reports_airflow(tmp_path):
+    from ventforge import mcp_server as m
+    m.new_design(path=str(tmp_path / "f.vent.json"))
+    out = m.fan_grille(80)
+    d = m.get_design()["design"]
+    assert d["canvas"]["width"] == 80 and len(d["keepouts"]) == 4
+    assert 0 < out["stats"]["fan_open_ratio"] < 1
+    fit = m.fit_open_area(0.5)  # targets the fan opening now
+    assert abs(fit["stats"]["fan_open_ratio"] - 0.5) < 0.01
+
+
+def test_library_round_trip(tmp_path, monkeypatch):
+    from ventforge import mcp_server as m
+    monkeypatch.setattr(m, "HOME", tmp_path)
+    m.new_design(path=str(tmp_path / "work.vent.json"))
+    m.fan_grille(92)
+    m.save_to_library("92mm case X")
+    assert "92mm case X" in m.list_presets()["library"]
+    m.new_design(path=str(tmp_path / "other.vent.json"), preset="92mm case X")
+    assert len(m.get_design()["design"]["keepouts"]) == 4
+    for bad in ("../evil", "a/b", ""):
+        with pytest.raises(ValueError):
+            m.save_to_library(bad)

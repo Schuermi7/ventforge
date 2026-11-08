@@ -1,3 +1,4 @@
+import math
 import time
 from pathlib import Path
 
@@ -332,3 +333,97 @@ def test_huge_concentric_radius_and_path_layers_stay_fast():
         t = time.perf_counter()
         assert generate(Design().patched(patch)).holes
         assert time.perf_counter() - t < 4, patch  # was out-of-memory / 5 s
+
+
+@pytest.mark.parametrize("patch", [
+    {"canvas": {"width": 2000, "height": 2000}, "pattern": {"grid": {"spacing_x": 1, "spacing_y": 1}}},
+    {"canvas": {"width": 3000, "height": 3000}, "pattern": {"mode": "voronoi", "voronoi": {"cell_size": 1}}},
+    {"canvas": {"width": 3000, "height": 3000}, "pattern": {"mode": "concentric"}},
+])
+def test_huge_layouts_refused_fast(patch):
+    t = time.perf_counter()
+    with pytest.raises(ValueError, match="points"):
+        generate(Design().patched(patch))
+    assert time.perf_counter() - t < 2  # was minutes and gigabytes
+
+
+def test_bad_types_rejected():
+    with pytest.raises(ValueError, match="boundary.clip"):
+        Design().patched({"boundary": {"clip": "false"}})  # bool("false") would switch clipping on
+    with pytest.raises(ValueError, match="dot must be an object"):
+        Design().patched({"dot": 5})
+
+
+def test_fan_grille_holes_over_blades_and_screw_holes():
+    from ventforge.model import FANS, fan_grille
+    d = fan_grille(Design(), 120)
+    r = generate(d)
+    pitch, screw = FANS[120]
+    screws = {(round(c[0], 2), round(c[1], 2)) for c in r.circles if c and abs(c[2] - screw / 2) < 1e-9}
+    assert screws == {(sx * pitch / 2, sy * pitch / 2) for sx in (-1, 1) for sy in (-1, 1)}
+    opening = shapely.Point(0, 0).buffer(d.boundary.vent_diameter / 2 + 1e-6)
+    assert sum(opening.contains(h) for h in r.holes) == len(r.holes) - 4
+    assert 0.2 < r.stats["fan_open_ratio"] < 0.8
+    with pytest.raises(ValueError, match="fan size"):
+        fan_grille(Design(), 77)
+
+
+def test_keepout_stays_free():
+    d = Design().patched({"keepouts": [{"shape": "rectangle", "x": 10, "y": -5, "width": 30, "height": 12,
+                                        "clearance": 2}]})
+    zone = shapely.box(10 - 17, -5 - 8, 10 + 17, -5 + 8).buffer(-1e-6)  # touching the edge is fine
+    holes = generate(d).holes
+    assert holes and not any(zone.intersects(h) for h in holes)
+
+
+def test_tool_radius_rounds_corners_and_drops_too_small():
+    d = Design().patched({"dot": {"shape": "rounded_rectangle", "corner_radius": 0, "diameter": 4}})
+    sharp = generate(d)
+    d.machining.tool_radius = 1.0
+    r = generate(d)
+    assert len(r.holes) == len(sharp.holes)
+    assert r.holes[0].area == pytest.approx(16 - (4 - math.pi) * 1.0, rel=0.02)  # 4 corners lose (1 - pi/4) r^2
+    d.machining.tool_radius = 2.5  # wider than the 4 mm holes
+    assert generate(d).stats["dropped_by_tool"] == len(sharp.holes)
+
+
+def test_kerf_offsets_cut_paths():
+    from ventforge.export import cut_paths
+    d = Design()
+    d.machining.kerf = 0.2
+    r = generate(d)
+    c = cut_paths(r, d)
+    assert c.circles[0][2] == pytest.approx(r.circles[0][2] - 0.1)
+    assert c.outline.area > r.outline.area
+
+
+def test_keepout_hole_is_cut_with_free_clearance_around_it():
+    d = Design().patched({"keepouts": [{"shape": "rectangle", "x": 0, "y": 0, "width": 10, "height": 6,
+                                        "hole": True}]})
+    r = generate(d)
+    assert any(h.equals_exact(shapely.box(-5, -3, 5, 3), 1e-6) or abs(h.area - 60) < 1e-6 for h in r.holes)
+    assert not any(h.intersects(shapely.box(-6.4, -4.4, 6.4, 4.4)) for h in r.holes if abs(h.area - 60) > 1e-6)
+
+
+def test_thinnest_wall_found_and_located():
+    d = Design().patched({"pattern": {"mode": "custom_points", "custom_points": {"points": [[0, 0], [5, 0], [30, 30]]}},
+                          "dot": {"diameter": 4}})
+    s = generate(d).stats
+    assert s["thinnest_wall"] == pytest.approx(1.0, abs=0.01)  # centres 5 apart, radius 2 each
+    assert s["thinnest_wall_at"] == pytest.approx([2.5, 0], abs=0.05)
+
+
+def test_airflow_loss_drops_as_open_area_grows():
+    small = generate(Design().patched({"dot": {"diameter": 2}})).stats
+    big = generate(Design().patched({"dot": {"diameter": 4}})).stats
+    assert big["open_area_ratio"] > small["open_area_ratio"]
+    assert 0 < big["pressure_drop_pa"] < small["pressure_drop_pa"]
+    assert big["pressure_drop_pa"] == pytest.approx(big["loss_coefficient"] * 1.2 * 4 / 2)
+
+
+def test_min_feature_flags_narrow_holes():
+    d = Design().patched({"dot": {"diameter": 3}})
+    assert "below_min_feature" not in generate(d).stats
+    d.machining.min_feature = 3.5
+    s = generate(d).stats
+    assert s["below_min_feature"] == s["count"]

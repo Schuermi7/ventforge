@@ -34,7 +34,8 @@ CIRCLE_SEGS = 48
 MIN_DOT = 0.05      # dots with diameter <= this (mm) are dropped
 MIN_SPACING = 1.0   # mm; smaller lattice pitches take tens of seconds and are not printable anyway
 MAX_COUNT = 20000   # cap for count parameters (also the GUI's hard max)
-SLIVER = 0.4        # clipped pieces thinner than this (mm) are dropped
+MAX_POINTS = 200_000  # lattice points a mode may lay out (big canvas x fine pitch hangs the app otherwise)
+SLIVER = 0.4       # clipped pieces thinner than this (mm) are dropped
 GOLDEN = math.pi * (3 - math.sqrt(5))
 NEUTRAL = {"size": 1.0, "spacing": 1.0, "angle": 0.0, "shape": 0.0}
 WARP_MODES = ("grid", "concentric", "crosslines", "spiral", "fibonacci")
@@ -57,6 +58,12 @@ def _frame(cover, deg):
 def _corner_dist(cover):
     x0, y0, x1, y1 = cover
     return max(math.hypot(x, y) for x in (x0, x1) for y in (y0, y1))
+
+
+def _limit(n, hint):
+    """Refuse layouts that would take minutes and gigabytes, before building them."""
+    if n > MAX_POINTS:
+        raise ValueError(f"this pattern needs about {int(n):,} points (max {MAX_POINTS:,}): {hint}")
 
 
 def _arclen(line):
@@ -371,6 +378,7 @@ def _grid(g, cover):
     stagger = g.arrangement in ("diamond", "hexagon")
     x0, y0, x1, y1 = _frame(cover, g.rotation)
     x0, x1, y0, y1 = x0 - g.offset_x, x1 - g.offset_x, y0 - g.offset_y, y1 - g.offset_y
+    _limit((x1 - x0) / sx * (y1 - y0) / sy, "raise the spacing or shrink the canvas")
     I, J = np.meshgrid(np.arange(math.floor(x0 / sx) - 2, math.ceil(x1 / sx) + 2),
                        np.arange(math.floor(y0 / sy) - 1, math.ceil(y1 / sy) + 2))
     I, J = I.ravel(), J.ravel()
@@ -506,6 +514,8 @@ def _spiral(sp):
 def _concentric(c, cover):
     outer = min(c.outer_radius, _corner_dist(cover)) if c.outer_radius > 0 else _corner_dist(cover)
     rs = max(c.ring_spacing, MIN_SPACING)
+    _limit(math.pi * outer ** 2 / (rs * max(c.dot_spacing, MIN_SPACING)),
+           "raise ring/dot spacing or set an outer radius")
     xs, angs = [], []
     k = 0
     while (r := c.inner_radius + k * rs) <= outer + 1e-9:
@@ -540,6 +550,7 @@ def _crosslines(c, cover):
     corners = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]) @ M.T
     i = np.arange(math.floor(corners[:, 0].min() / s1) - 1, math.ceil(corners[:, 0].max() / s1) + 2)
     j = np.arange(math.floor(corners[:, 1].min() / s2) - 1, math.ceil(corners[:, 1].max() / s2) + 2)
+    _limit(len(i) * len(j), "raise the line spacings or shrink the canvas")
     I, J = (a.ravel() for a in np.meshgrid(i, j))
     xy = np.c_[I * s1, J * s2] @ np.linalg.inv(M).T
     inb = (xy[:, 0] >= x0) & (xy[:, 0] <= x1) & (xy[:, 1] >= y0) & (xy[:, 1] <= y1)
@@ -571,6 +582,7 @@ def _voronoi(design, cover, inner):
     cs = max(v.cell_size, MIN_SPACING)
     rng = np.random.default_rng(v.seed)
     x0, y0, x1, y1 = _frame(cover, v.rotation)
+    _limit((x1 - x0) * (y1 - y0) / cs ** 2, "raise the cell size or shrink the canvas")
     I, J = np.meshgrid(np.arange(math.floor(x0 / cs) - 2, math.ceil(x1 / cs) + 3),
                        np.arange(math.floor(y0 / cs) - 2, math.ceil(y1 / cs) + 3))
     seeds = np.c_[I.ravel(), J.ravel()] * cs
@@ -608,6 +620,7 @@ def _flowlines(design, cover, inner):
         R = _corner_dist(cover) + w + abs(f.amplitude)
         x = np.arange(-R, R + 0.5, min(0.5, max(f.wavelength, 2.0) / 32))
         ys = np.arange(-math.ceil(R / sp), math.ceil(R / sp) + 1) * sp
+        _limit(len(x) * len(ys) / 10, "raise the slot spacing or shrink the canvas")  # /10: vertices, not holes
         X, Y = np.meshgrid(x, ys)
         wave = f.amplitude * np.sin(2 * math.pi * X / max(f.wavelength, 2.0))
         noise = 0.25 * f.amplitude * _value_noise(np.c_[X.ravel(), Y.ravel()], max(f.wavelength, 1.0), f.seed)
@@ -675,7 +688,107 @@ def _stats(holes, outline, min_wall):
         i, j = tree.query(holes, predicate="dwithin", distance=min_wall - 1e-6)
         viol = len(np.unique(i[i != j]))
     return {"count": n, "open_area_ratio": area / plate if plate else 0.0, "hole_area": area,
-            "plate_area": plate, "min_wall_violations": viol}
+            "plate_area": plate, "min_wall_violations": viol, **_thinnest_wall(tree, holes, outline)}
+
+
+def _thinnest_wall(tree, holes, outline):
+    """Narrowest strip of plate between two holes or a hole and the plate edge, and where it is.
+    Overlapping holes (distance 0) form one opening and are skipped."""
+    holes = np.asarray(holes, dtype=object)
+    w = np.inf
+    pair = None
+    D = 1.0
+    x0, y0, x1, y1 = outline.bounds
+    while pair is None and len(holes) > 1 and D < 2 * max(x1 - x0, y1 - y0):  # widen the search until a gap shows up
+        i, j = tree.query(holes, predicate="dwithin", distance=D)
+        i, j = i[i < j], j[i < j]
+        dist = shapely.distance(holes[i], holes[j])
+        ok = dist > 1e-9
+        if ok.any():
+            k = np.argmin(np.where(ok, dist, np.inf))
+            w, pair = float(dist[k]), (holes[i[k]], holes[j[k]])
+        D *= 4
+    edge = shapely.distance(holes, outline.boundary)
+    edge = np.where(edge > 1e-9, edge, np.inf)  # clipped holes touch the edge on purpose
+    if len(edge) and edge.min() < w:
+        k = int(np.argmin(edge))
+        w, pair = float(edge[k]), (holes[k], outline.boundary)
+    if pair is None:
+        return {}
+    mid = shapely.shortest_line(*pair).centroid
+    return {"thinnest_wall": w, "thinnest_wall_at": [round(mid.x, 3), round(mid.y, 3)]}
+
+
+def _airflow(open_ratio):
+    """Pressure loss of a thin perforated plate (Idelchik): zeta = ((0.707 sqrt(1-f) + 1 - f) / f)^2.
+    shortcut: thin plate, evenly spread holes; Pa figure at 2 m/s face velocity (typical case fan), not a CFD run."""
+    if not 0 < open_ratio < 1:
+        return {}
+    zeta = ((0.707 * math.sqrt(1 - open_ratio) + 1 - open_ratio) / open_ratio) ** 2
+    return {"loss_coefficient": zeta, "pressure_drop_pa": zeta * 1.2 * 2.0 ** 2 / 2}
+
+
+# ---------------------------------------------------------------- keep-outs, machining
+def _keepout_geom(k):
+    if k.shape == "rectangle":
+        return box(k.x - k.width / 2, k.y - k.height / 2, k.x + k.width / 2, k.y + k.height / 2)
+    return Point(k.x, k.y).buffer(k.width / 2, quad_segs=16)
+
+
+def _vent_region(design: Design, inner):
+    """The plate area holes may use: minus the fan opening's outside and the keep-outs."""
+    vd = design.boundary.vent_diameter
+    if vd > 0:
+        inner = inner.intersection(Point(0, 0).buffer(vd / 2 - max(design.boundary.margin, 0), quad_segs=32))
+    if design.keepouts:
+        inner = inner.difference(shapely.union_all([_keepout_geom(k).buffer(max(k.clearance, 0))
+                                                    for k in design.keepouts]))
+    return inner
+
+
+def _tool_radius(holes, circles, t):
+    """An end mill of radius t cannot cut corners sharper than t: each hole becomes the area the tool reaches
+    (opening = shrink then grow by t). Holes too narrow for the tool are dropped. Returns holes, circles, dropped."""
+    if t <= 0 or not holes:
+        return holes, circles, 0
+    poly = [i for i, c in enumerate(circles) if not c]
+    opened = shapely.buffer(shapely.buffer(np.asarray([holes[i] for i in poly], dtype=object), -t), t, quad_segs=8)
+    out_h, out_c = [], []
+    for h, c in zip(holes, circles):
+        if c and c[2] >= t:
+            out_h.append(h)
+            out_c.append(c)
+    for g in opened:
+        for part in shapely.get_parts(g):
+            if part.geom_type == "Polygon" and part.area > 1e-9:
+                out_h.append(part)
+                out_c.append(None)
+    dropped = sum(1 for c in circles if c and c[2] < t) + int(shapely.is_empty(opened).sum())
+    return out_h, out_c, dropped
+
+
+def _finish(design: Design, outline, holes, circles) -> Result:
+    """Machining, fan-opening stats and keep-out screw holes, shared by every mode."""
+    holes, circles, dropped = _tool_radius(list(holes), list(circles), design.machining.tool_radius)
+    extra = {}
+    vd = design.boundary.vent_diameter
+    if vd > 0:
+        fan = Point(0, 0).buffer(vd / 2, quad_segs=32)
+        extra["fan_open_ratio"] = shapely.union_all(holes).intersection(fan).area / fan.area if holes else 0.0
+    if dropped:
+        extra["dropped_by_tool"] = dropped
+    mf = design.machining.min_feature
+    if mf > 0 and holes:  # a hole narrower than this closes up when printed (about 2x nozzle) or cannot be cut
+        thin = int(shapely.is_empty(shapely.buffer(np.asarray(holes, dtype=object), -mf / 2 + 1e-9)).sum())
+        if thin:
+            extra["below_min_feature"] = thin
+    for k in design.keepouts:
+        if k.hole:
+            holes.append(_keepout_geom(k))
+            circles.append((k.x, k.y, k.width / 2) if k.shape == "circle" else None)
+    stats = {**_stats(holes, outline, design.min_wall), **extra}
+    stats.update(_airflow(stats.get("fan_open_ratio", stats["open_area_ratio"])))
+    return Result(holes=holes, outline=outline, stats=stats, circles=circles)
 
 
 # ---------------------------------------------------------------- main
@@ -685,9 +798,9 @@ def generate(design: Design) -> Result:
     mode = pat.mode
     if mode not in MODES:
         raise ValueError(f"unknown pattern mode: {mode!r}")
-    inner = outline.buffer(-b.margin) if b.margin > 0 else outline
+    inner = _vent_region(design, outline.buffer(-b.margin) if b.margin > 0 else outline)
     if inner.is_empty or dot.diameter <= 0 and mode not in ("voronoi", "flowlines"):
-        return Result(holes=[], outline=outline, stats=_stats([], outline, design.min_wall), circles=[])
+        return _finish(design, outline, [], [])
     shapely.prepare(inner)
     d = dot.diameter
     reach = d * max(1.0, dot.aspect) * _gmax(gr.size, 1.0)
@@ -703,9 +816,7 @@ def generate(design: Design) -> Result:
     if mode in ("voronoi", "flowlines"):
         polys = (_voronoi if mode == "voronoi" else _flowlines)(design, cover, inner)
         holes, _ = _fit(np.asarray(polys, dtype=object), inner, b.clip or mode == "flowlines")
-        holes = list(holes)
-        return Result(holes=holes, outline=outline, stats=_stats(holes, outline, design.min_wall),
-                      circles=[None] * len(holes))
+        return _finish(design, outline, list(holes), [None] * len(holes))
 
     if mode == "grid":
         xy, ang, sz = _grid(pat.grid, cover)
@@ -752,5 +863,4 @@ def generate(design: Design) -> Result:
     circ = [(float(x), float(y), float(s * d / 2)) if e else None for (x, y), s, e in zip(xy, sz, exact)]
     kept, inside = _fit(holes, inner, b.clip)
     circles = [c for c, k in zip(circ, inside) if k] + [None] * (len(kept) - int(inside.sum()))
-    kept = list(kept)
-    return Result(holes=kept, outline=outline, stats=_stats(kept, outline, design.min_wall), circles=circles)
+    return _finish(design, outline, list(kept), circles)

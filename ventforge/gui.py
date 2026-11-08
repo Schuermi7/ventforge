@@ -12,18 +12,19 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import get_type_hints
 
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QFileSystemWatcher, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, QSizeF, Qt, QThread, QTimer, QFileSystemWatcher, Signal
 from PySide6.QtGui import (QAction, QBrush, QColor, QIcon, QKeySequence, QPainter, QPainterPath,
                            QPainterPathStroker, QPalette, QPen, QPixmap, QPolygonF, QTransform)
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox,
                                QDialog, QDialogButtonBox, QDockWidget, QDoubleSpinBox, QFileDialog, QFormLayout,
                                QGraphicsEllipseItem, QGraphicsItem, QGraphicsPixmapItem, QGraphicsScene,
-                               QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QGraphicsView, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea,
                                QSizePolicy, QSlider, QSpinBox, QStackedWidget, QStyle, QTabWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .model import (CHOICES, GRADS, MODES, SHAPES, Control, Design, DotStyle, Gradient, Pattern)
+from .model import (CHOICES, FANS, GRADS, MODES, SHAPES, Control, Design, DotStyle, Gradient, Keepout,
+                    Machining, Pattern, fan_grille)
 
 PRESETS = Path(__file__).resolve().parent / "presets"
 
@@ -44,6 +45,7 @@ META = {  # name: (min, max, step, suffix)
     "opacity": (0, 1, 0.05, ""), "offset_x": (-500, 500, 0.5, " mm"), "offset_y": (-500, 500, 0.5, " mm"),
     "turns": (0.1, 200, 0.5, ""), "spread": (0.1, 50, 0.1, ""), "width": (1, 5000, 1, " mm"),
     "height": (1, 5000, 1, " mm"), "thickness": (0.1, 100, 0.1, " mm"), "diameter": (0.1, 500, 0.1, " mm"),
+    "kerf": (0, 2, 0.01, " mm"), "tool_radius": (0, 20, 0.05, " mm"), "min_feature": (0, 20, 0.05, " mm"),
 }
 MM_WORDS = ("spacing", "radius", "diameter", "distance", "width", "margin", "size", "amplitude",
             "wavelength", "scale", "min_wall")
@@ -72,7 +74,8 @@ SOFT_PATH = {
     "pattern.concentric.inner_radius": (0, 60), "pattern.concentric.outer_radius": (0, 70),
     "pattern.fibonacci.count": (10, 700), "pattern.fibonacci.spread": (1, 10),
     "pattern.fibonacci.inner_radius": (0, 40), "pattern.crosslines.rotation": (-90, 90),
-    "pattern.voronoi.corner_radius": (0, 5), "pattern.flowlines.line_spacing": (2, 30),
+    "pattern.voronoi.corner_radius": (0, 5), "boundary.vent_diameter": (0, 300),
+    "machining.kerf": (0, 0.5), "machining.tool_radius": (0, 3), "machining.min_feature": (0, 3), "pattern.flowlines.line_spacing": (2, 30),
 }
 SOFT = {"diameter": (0.3, 20), "thickness": (0.5, 10), "margin": (0, 20), "corner_radius": (0, 20),
         "aspect": (0.2, 5), "sides": (3, 12), "star_points": (3, 12), "star_inner": (0.1, 0.9),
@@ -193,6 +196,13 @@ def _add_geom(path, g):
         for ring in (p.exterior, *p.interiors):
             path.addPolygon(QPolygonF([QPointF(x, -y) for x, y in ring.coords]))
             path.closeSubpath()
+
+
+def add_keepout_path(path, k):
+    if k.shape == "rectangle":
+        path.addRect(QRectF(S(k.x - k.width / 2, k.y + k.height / 2), QSizeF(k.width, k.height)))
+    else:
+        path.addEllipse(S(k.x, k.y), k.width / 2, k.width / 2)
 
 
 def result_paths(r):
@@ -539,6 +549,12 @@ class Canvas(QGraphicsView):
         self.decor.setZValue(3)
         self.draft = sc.addPath(QPainterPath(), QPen(QColor(255, 120, 120), 0))
         self.draft.setZValue(4)
+        self.keep = sc.addPath(QPainterPath(), QPen(QColor(255, 170, 60), 0, Qt.DashLine))
+        self.keep.setZValue(3)
+        self.weak = sc.addEllipse(-7, -7, 14, 14, QPen(QColor(255, 80, 80), 2))  # thinnest wall marker, in px
+        self.weak.setFlag(QGraphicsItem.ItemIgnoresTransformations)
+        self.weak.setZValue(6)
+        self.weak.setVisible(False)
         self.ruler = sc.addLine(0, 0, 0, 0, QPen(QColor(255, 255, 255), 0))
         self.ruler.setZValue(5)
         self.ruler_txt = sc.addSimpleText("")
@@ -572,6 +588,16 @@ class Canvas(QGraphicsView):
         self.holes.setPath(holes)
         self.holes.setBrush(QColor(color))
         self.plate.setPath(outline)
+
+    def set_overlays(self, keepouts, weak, bad):
+        path = QPainterPath()
+        for k in keepouts:
+            add_keepout_path(path, k)
+        self.keep.setPath(path)
+        self.weak.setVisible(weak is not None)
+        if weak is not None:
+            self.weak.setPos(S(*weak))
+            self.weak.setPen(QPen(QColor(255, 80, 80) if bad else QColor(240, 210, 90), 2))
 
     def set_background(self, pm, w, h, opacity):
         self.bg.setVisible(pm is not None)
@@ -691,6 +717,11 @@ class Canvas(QGraphicsView):
         if self.tool == "ruler" and e.button() == Qt.LeftButton:
             self.ruler_start = pos
             self._ruler(pos)
+        elif self.tool == "keepout":
+            if e.button() == Qt.RightButton:
+                self.win.remove_keepout(pos.x(), -pos.y())
+            elif e.button() == Qt.LeftButton:
+                self.ruler_start = pos
         elif self.tool == "draw":
             if e.button() == Qt.RightButton:
                 self.finish_draw()
@@ -714,6 +745,12 @@ class Canvas(QGraphicsView):
             self._ruler(pos)
         elif self.tool == "draw" and self.draft_pts:
             self._draft(pos)
+        elif self.tool == "keepout" and self.ruler_start is not None:
+            path = QPainterPath()
+            if k := self._keepout(pos, e.modifiers()):
+                self.win.statusBar().showMessage(f"{k.shape} {k.width:.1f} × {k.height:.1f} mm at ({k.x:.1f}, {k.y:.1f})")
+                add_keepout_path(path, k)
+            self.draft.setPath(path)
         else:
             super().mouseMoveEvent(e)
 
@@ -721,6 +758,13 @@ class Canvas(QGraphicsView):
         if self.pan_pos is not None:
             self.pan_pos = None
             self.viewport().setCursor(Qt.CrossCursor if self.tool else Qt.OpenHandCursor)
+            return
+        if self.tool == "keepout" and self.ruler_start is not None and e.button() == Qt.LeftButton:
+            k = self._keepout(self.mapToScene(e.position().toPoint()), e.modifiers())
+            self.ruler_start = None
+            self.draft.setPath(QPainterPath())
+            if k:
+                self.win.add_keepout(k)
             return
         super().mouseReleaseEvent(e)
         if self.tool is None:
@@ -759,6 +803,18 @@ class Canvas(QGraphicsView):
         self.ruler_txt.setText(f"{d:.2f} mm  {ang:.1f}°")
         self.ruler_txt.setPos(pos + QPointF(2 / self.transform().m11(), 0))
         self.win.statusBar().showMessage(f"Distance {d:.2f} mm, dx {pos.x() - a.x():.2f}, dy {a.y() - pos.y():.2f}")
+
+    def _keepout(self, pos, mods):
+        """Drag corner to corner for a rectangle; with Shift, from the centre for a circle."""
+        a = self.ruler_start
+        if mods & Qt.ShiftModifier:
+            r = math.hypot(pos.x() - a.x(), pos.y() - a.y())
+            return Keepout("circle", round(a.x(), 2), round(-a.y(), 2), round(2 * r, 2), round(2 * r, 2)) if r > .25 else None
+        w, h = abs(pos.x() - a.x()), abs(pos.y() - a.y())
+        if min(w, h) < .5:
+            return None
+        return Keepout("rectangle", round((a.x() + pos.x()) / 2, 2), round(-(a.y() + pos.y()) / 2, 2),
+                       round(w, 2), round(h, 2))
 
     def _draft(self, cursor):
         path = QPainterPath(self.draft_pts[0])
@@ -840,7 +896,9 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         self.ruler_act = act("Ruler", lambda on: self.set_tool("ruler" if on else None), "R", True)
         self.draw_act = act("Draw outline", lambda on: self.set_tool("draw" if on else None), "B", True)
+        self.keep_act = act("Keep-out", lambda on: self.set_tool("keepout" if on else None), "K", True)
         act("Zoom to fit", self.canvas.zoom_fit, "Z")
+        act("Fan grille…", self.fan_dialog).setToolTip("Plate for a standard fan: blade opening and 4 screw holes")
         tb.addSeparator()
         menu_btn = QToolButton(text="  Export  ", popupMode=QToolButton.InstantPopup)
         menu_btn.setObjectName("export")
@@ -963,6 +1021,10 @@ class MainWindow(QMainWindow):
         bf.addRow(row(button("Draw outline", lambda: self.draw_act.trigger(),
                              "Click points on the canvas; double-click, Enter or right-click to finish"),
                       button("Clear outline", lambda: self.set_param("boundary.points", []))))
+        bf.addRow("Keep-outs", self.field_widget("keepouts", "keepouts", list))
+        bf.addRow(row(button("Clear keep-outs", lambda: self.set_param("keepouts", []),
+                             "Screw holes and hole-free areas (set by Fan grille or the MCP server)")))
+        mcw, _, _ = self.form("machining", Machining)
         # background
         gw = QWidget()
         gf = QFormLayout(gw)
@@ -973,7 +1035,7 @@ class MainWindow(QMainWindow):
         gf.addRow(row(button("Load image…", self.load_background),
                       button("Clear", lambda: self.set_param("background.image", ""))))
         self._dock("Design", [Section("Library", lib), Section("Canvas", cw), Section("Boundary", bw),
-                              Section("Background image", gw, False)], Qt.LeftDockWidgetArea)
+                              Section("Machining", mcw, False), Section("Background image", gw, False)], Qt.LeftDockWidgetArea)
 
     def _right_dock(self):
         self.grad_tabs = QTabWidget()
@@ -1048,7 +1110,9 @@ class MainWindow(QMainWindow):
             elif isinstance(w, QLineEdit):
                 w.setText(str(v))
             elif isinstance(w, QLabel):
-                w.setText(f"{len(v)} point(s) — edit via file / MCP" if v else "none (default)")
+                w.setText(f"{len(v)} {'keep-out' if path == 'keepouts' else 'point'}(s)" + (" — draw with K, right-click to remove"
+                          if path == 'keepouts' else " — edit via file / MCP")
+                          if v else "none (default)")
             w.blockSignals(False)
         for w in self.findChildren(SliderField):  # canvas-relative slider ranges
             if getattr(w, "path", None) in SCALE:
@@ -1274,10 +1338,38 @@ class MainWindow(QMainWindow):
     def set_tool(self, tool):
         self.ruler_act.setChecked(tool == "ruler")
         self.draw_act.setChecked(tool == "draw")
+        self.keep_act.setChecked(tool == "keepout")
         self.canvas.set_tool(tool)
+        if tool == "keepout":
+            self.statusBar().showMessage("Drag a hole-free rectangle (Shift: circle from its centre); right-click one to"
+                                         " remove it, Esc to finish")
         if tool == "draw":
             self.statusBar().showMessage("Click to add outline points; double-click / Enter / right-click to finish,"
                                          " Esc to cancel")
+
+    def fan_dialog(self):
+        sizes = [f"{s} mm" for s in FANS]
+        s, ok = QInputDialog.getItem(self, "Fan grille", "Fan size (the hole pattern stays):", sizes, sizes.index("120 mm"),
+                                     False)
+        if ok:
+            self.need_fit = True
+            self.set_design(fan_grille(clone(self.design), int(s.split()[0])))
+            self.dirty = True
+            self.autosave()
+
+    def add_keepout(self, k):
+        self.design.keepouts.append(k)
+        self.changed(sync=True)
+        self.commit()
+
+    def remove_keepout(self, x, y):
+        from .pattern import _keepout_geom
+        from shapely import Point
+        hit = [i for i, k in enumerate(self.design.keepouts) if _keepout_geom(k).buffer(1).contains(Point(x, y))]
+        if hit:
+            del self.design.keepouts[hit[-1]]  # the topmost (last drawn)
+            self.changed(sync=True)
+            self.commit()
 
     def set_custom_boundary(self, pts):
         self.design.boundary.points = pts
@@ -1321,9 +1413,17 @@ class MainWindow(QMainWindow):
         self.canvas.set_result(holes, outline, self.design.dot.color)
         s = r.stats
         self.st["count"].setText(f"{s.get('count', len(r.holes))} dots")
-        self.st["open"].setText(f"open {100 * s.get('open_area_ratio', 0):.1f} %")
+        self.st["open"].setText(f"open {100 * s.get('open_area_ratio', 0):.1f} %"
+                                + (f"  ·  fan {100 * s['fan_open_ratio']:.0f} % open" if "fan_open_ratio" in s else "")
+                                + (f"  ·  {s['dropped_by_tool']} too small for the tool" if s.get("dropped_by_tool") else ""))
         v = s.get("min_wall_violations", 0)
-        self.st["viol"].setText(f"min-wall violations {v}")
+        tw = s.get("thinnest_wall")
+        self.st["viol"].setText(f"min-wall violations {v}" + (f"  ·  thinnest wall {tw:.2f} mm" if tw else "")
+                                + (f"  ·  {s['below_min_feature']} holes below min feature"
+                                   if s.get("below_min_feature") else "")
+                                + (f"  ·  airflow loss {s['pressure_drop_pa']:.0f} Pa @2 m/s"
+                                   if "pressure_drop_pa" in s else ""))
+        self.canvas.set_overlays(self.design.keepouts, s.get("thinnest_wall_at"), tw is not None and tw < self.design.min_wall)
         self.st["viol"].setStyleSheet("color:#ff7070" if v else "")
         self.st["time"].setText(f"{dt * 1000:.0f} ms")
         warn = f"   ⚠ {v} walls thinner than {self.design.min_wall:g} mm" if v else ""
