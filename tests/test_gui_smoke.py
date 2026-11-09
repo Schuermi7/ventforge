@@ -66,7 +66,7 @@ def test_gui_smoke(win, tmp_path):
     for m in MODES:
         w.set_param("pattern.mode", m)
         settle(w)
-        assert w.mode_stack.currentIndex() == MODES.index(m)
+        assert [not p.isHidden() for p in w.mode_stack.pages] == [k == m for k in MODES]
         assert "Generate failed" not in w.statusBar().currentMessage(), m
     w.set_param("pattern.mode", "grid")
     w.commit()
@@ -95,9 +95,30 @@ def test_gui_smoke(win, tmp_path):
     assert w.design.gradients.size.controls[0].points[0] == [10.0, 5.0]
     w.randomize()
     settle(w)
-    w.set_custom_boundary([[-40, -40], [40, -40], [0, 45]])
+    tri = [[-40, -40], [40, -40], [0, 45]]
+    for target in ("outline", "path", "points", "hole"):  # what the draw buttons do once the clicks are in
+        w.start_draw(target)
+        w.finish_drawing(tri)
+        w.set_tool(None)
     settle(w)
-    assert w.design.boundary.type == "custom"
+    d = w.design
+    assert d.boundary.type == "custom" and d.boundary.points == tri and d.pattern.path.points == tri
+    assert d.pattern.custom_points.points == tri and d.dot.shape == "custom" and d.dot.custom_points == tri
+    w.start_draw("path")
+    w.finish_drawing(tri[:1])  # too few points: nothing changes
+    assert w.design.pattern.path.points == tri
+
+    # picking "Drawn" with nothing drawn starts drawing; no toolbar button repeats a panel button
+    w.set_design(Design())
+    w.set_param("boundary.type", "custom")
+    assert w.canvas.tool == "draw" and w.draw_target == "outline" and w.draw_act.isChecked()
+    w.set_param("boundary.type", "circle")  # changed their mind: the drawing stops
+    assert w.canvas.tool is None
+    from PySide6.QtWidgets import QPushButton, QToolBar
+    bar = {a.text() for tb in w.findChildren(QToolBar) for a in tb.actions() if a.text()}
+    assert not bar & {b.text() for b in w.findChildren(QPushButton)}
+    assert len(bar) == len([a for tb in w.findChildren(QToolBar) for a in tb.actions() if a.text()])
+    w.set_design(Design())
 
     # save, then edit the file externally -> live reload, own write ignored
     f = tmp_path / "t.vent.json"

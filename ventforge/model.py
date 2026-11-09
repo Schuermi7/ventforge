@@ -310,6 +310,12 @@ class Design:
         return Design.from_dict(_merge(self.to_dict(), patch))
 
 
+def mark_saved(path: str | Path) -> None:
+    """A finished save (Ctrl+S, or the MCP's apply_to_fusion). The Fusion add-in rebuilds linked parts only
+    on these, not on every autosave, because rebuilding is slow."""
+    Path(f"{path}.saved").touch()
+
+
 def fan_grille(d: Design, size: int) -> Design:
     """Plate for a standard fan: square canvas, rounded corners, holes only over the blades, 4 screw holes."""
     if size not in FANS:

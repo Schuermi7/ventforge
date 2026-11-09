@@ -19,12 +19,12 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QButtonGroup, QCh
                                QDialog, QDialogButtonBox, QDockWidget, QDoubleSpinBox, QFileDialog, QFormLayout,
                                QGraphicsEllipseItem, QGraphicsItem, QGraphicsPixmapItem, QGraphicsScene,
                                QGraphicsView, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea,
-                               QSizePolicy, QSlider, QSpinBox, QStackedWidget, QStyle, QTabWidget, QToolButton,
+                               QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+                               QSizePolicy, QSlider, QSpinBox, QStyle, QTabWidget, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .model import (CHOICES, FANS, GRADS, MODES, SHAPES, Control, Design, DotStyle, Gradient, Keepout,
-                    Machining, Pattern, fan_grille)
+from .model import CHOICES, FANS, GRADS, MODES, SHAPES, Control, Design, Keepout, Pattern, fan_grille, mark_saved
+from .params import DRAW, GRAD_INFO, MODE_INFO, TIPS, choice_text, hidden, label_for, switch_on
 
 PRESETS = Path(__file__).resolve().parent / "presets"
 
@@ -49,10 +49,6 @@ META = {  # name: (min, max, step, suffix)
 }
 MM_WORDS = ("spacing", "radius", "diameter", "distance", "width", "margin", "size", "amplitude",
             "wavelength", "scale", "min_wall")
-LABELS = {"rotate_by": "Rotate by", "min_wall": "Min wall", "star_inner": "Star inner ratio",
-          "noise_seed": "Noise seed", "edge": "Edge value"}
-DOT_VIS = {"circle": (), "hexagon": (), "custom": (), "rounded_rectangle": ("aspect", "corner_radius"),
-           "polygon": ("sides",), "star": ("star_points", "star_inner")}
 RAND = {"spacing_x": (4, 10), "spacing_y": (4, 10), "row_rotation": (0, 90), "rotation": (0, 90),
         "count": (100, 800), "min_distance": (3, 8), "turns": (2, 10), "ring_spacing": (4, 9),
         "dot_spacing": (4, 9), "spread": (1.5, 4), "left_angle": (30, 80), "right_angle": (100, 150),
@@ -101,15 +97,12 @@ SCALE = {"boundary.corner_radius": 1, "pattern.random.count": 2, "pattern.path.c
          "pattern.concentric.inner_radius": 1, "pattern.concentric.outer_radius": 1,
          "pattern.fibonacci.count": 2, "pattern.fibonacci.inner_radius": 1,
          **{f"gradients.{g}.radius": 1 for g in GRADS}}
-ADVANCED = {"offset_x", "offset_y", "row_rotation", "rotate_by", "seed", "noise_seed", "noise_scale", "falloff",
-            "image_min", "image_max", "invert_image", "closed", "smooth", "even_spacing", "layer_spacing",
-            "stagger", "outer_radius", "inner_radius", "clip", "edge_style", "follow_boundary", "amplitude",
-            "wavelength", "thickness"}
-LABELS.update({"diameter": "Hole size", "spacing_x": "Spacing", "spacing_y": "Row spacing", "edge": "Far value",
-               "count": "Number of holes", "line_width": "Slot width", "line_spacing": "Slot spacing",
-               "cell_size": "Cell size", "crack_width": "Wall width", "noise": "Randomness",
-               "enabled": "On", "type": "Shape", "star_inner": "Star depth", "aspect": "Stretch"})
-
+# rarely needed: folded into "More options"
+ADVANCED = {"offset_x", "offset_y", "even_spacing"}
+DRAW_POINTS = {"outline": "boundary.points", "path": "pattern.path.points", "points": "pattern.custom_points.points",
+               "hole": "dot.custom_points"}  # where each canvas drawing goes
+DRAW_ON_PICK = {("boundary.type", "custom"): "outline", ("dot.shape", "custom"): "hole",
+                ("pattern.mode", "custom_points"): "points"}
 
 def soft_range(path, name, lo, hi, canvas=None):
     g = path.split(".")[1] if path.startswith("gradients.") and path.count(".") == 2 else None
@@ -161,8 +154,17 @@ def slider_field(path, name, t, canvas=None):
     return w
 
 
-def label_for(name):
-    return LABELS.get(name, name.replace("_", " ").capitalize())
+def fill_soft(path, d: Design):
+    """Slider ranges that stop where more stops adding holes (a full plate), or None."""
+    area = d.canvas.width * d.canvas.height
+    if path == "pattern.fibonacci.count":
+        f = d.pattern.fibonacci
+        n = (area / 2 - f.inner_radius ** 2) / max(f.spread, 0.1) ** 2  # r = spread·√n reaches the corners
+        return 10, min(META["count"][1], max(30, round(n * 1.05)))
+    if path == "pattern.random.count":
+        n = area / (0.8 * max(d.pattern.random.min_distance, 0.5) ** 2)  # about what random placement can fit
+        return 5, min(META["count"][1], max(30, round(n)))
+    return None
 
 
 def getp(obj, path):
@@ -331,27 +333,25 @@ class Section(QWidget):
         lay.addWidget(body)
 
 
-class DragLabel(QLabel):
-    """Form label that scrubs its spin box when dragged horizontally."""
+def form_layout():
+    f = QFormLayout()
+    f.setContentsMargins(4, 2, 4, 2)
+    f.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+    f.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    return f
 
-    def __init__(self, text, spin):
-        super().__init__(text)
-        self.spin, self.x0, self.v0 = spin, None, 0
-        if isinstance(spin, (QSpinBox, QDoubleSpinBox)):
-            self.setCursor(Qt.SizeHorCursor)
-            self.setToolTip("Drag left/right to adjust")
 
-    def mousePressEvent(self, e):
-        if isinstance(self.spin, (QSpinBox, QDoubleSpinBox)):
-            self.x0, self.v0 = e.position().x(), self.spin.value()
+def note(text):
+    """Small grey explanation under a control."""
+    w = QLabel(text, wordWrap=True)
+    w.setProperty("note", True)
+    return w
 
-    def mouseMoveEvent(self, e):
-        if self.x0 is not None:
-            steps = round((e.position().x() - self.x0) / 4)
-            self.spin.setValue(type(self.v0)(self.v0 + steps * self.spin.singleStep()))
 
-    def mouseReleaseEvent(self, e):
-        self.x0 = None
+def heading(text):
+    w = QLabel(text)
+    w.setProperty("heading", True)
+    return w
 
 
 def row(*ws):
@@ -471,6 +471,7 @@ class Picker(QWidget):
             self.btns[val] = b
             grid.addWidget(b, i // cols, i % cols)
         self.vals = [o[0] for o in options]
+        self.tiles = any(o[2] is not None for o in options)
         self.group.idClicked.connect(lambda i: self.valueChanged.emit(self.vals[i]))
 
     def value(self):
@@ -479,6 +480,24 @@ class Picker(QWidget):
     def setValue(self, v):
         if v in self.btns:
             self.btns[v].setChecked(True)
+
+
+class Pages(QWidget):
+    """Shows one page at a time and is only as tall as that page (QStackedWidget keeps the tallest height)."""
+
+    def __init__(self):
+        super().__init__()
+        self.lay, self.pages = QVBoxLayout(self), []
+        self.lay.setContentsMargins(0, 0, 0, 0)
+
+    def addWidget(self, w):
+        self.pages.append(w)
+        self.lay.addWidget(w)
+        w.setVisible(len(self.pages) == 1)
+
+    def setCurrentIndex(self, i):
+        for k, w in enumerate(self.pages):
+            w.setVisible(k == i)
 
 
 class ZoomBar(QWidget):
@@ -820,9 +839,14 @@ class Canvas(QGraphicsView):
                        round(w, 2), round(h, 2))
 
     def _draft(self, cursor):
-        path = QPainterPath(self.draft_pts[0])
-        for q in self.draft_pts[1:] + [cursor]:
-            path.lineTo(q)
+        path = QPainterPath()
+        if self.win.draw_target == "points":  # loose points, not a line
+            for q in self.draft_pts:
+                path.addEllipse(q, 0.8, 0.8)
+        else:
+            path.moveTo(self.draft_pts[0])
+            for q in self.draft_pts[1:] + [cursor]:
+                path.lineTo(q)
         self.draft.setPath(path)
 
     def finish_draw(self):
@@ -831,8 +855,7 @@ class Canvas(QGraphicsView):
         while len(pts) > 1 and math.dist(pts[-1], pts[-2]) < 1e-6:
             pts.pop()
         self.win.set_tool(None)
-        if len(pts) >= 3:
-            self.win.set_custom_boundary(pts)
+        self.win.finish_drawing(pts)
 
 
 # ---------------------------------------------------------------- main window
@@ -846,6 +869,7 @@ class MainWindow(QMainWindow):
         self.bindings, self.tasks, self.gen_task, self.gen_pending = [], set(), None, False
         self.saved_json, self.result, self.bg_key, self.need_fit = None, None, None, True
         self.thumb_queue = []
+        self.rows, self.more, self.draw_target = {}, [], "outline"  # rows: path -> [(form, widget)]
         self.canvas = Canvas(self)
         self.setCentralWidget(self.canvas)
         self.regen_timer = QTimer(self, singleShot=True, interval=40, timeout=self.regen_now)
@@ -875,7 +899,7 @@ class MainWindow(QMainWindow):
         icons = {"New": QStyle.SP_FileIcon, "Open": QStyle.SP_DialogOpenButton, "Save": QStyle.SP_DialogSaveButton,
                  "Undo": QStyle.SP_ArrowBack, "Redo": QStyle.SP_ArrowForward, "Reset": QStyle.SP_BrowserReload}
 
-        def act(text, slot, key=None, checkable=False):
+        def act(text, slot, key=None, checkable=False, shown=True):
             a = QAction(text, self, checkable=checkable)
             if text in icons:
                 a.setIcon(self.style().standardIcon(icons[text]))
@@ -883,7 +907,7 @@ class MainWindow(QMainWindow):
             if key:
                 a.setShortcut(QKeySequence(key))
                 a.setToolTip(f"{text} ({QKeySequence(key).toString()})")
-            tb.addAction(a)
+            (tb if shown else self).addAction(a)  # shortcut-only: the button lives in the panel or on the canvas
             return a
 
         act("New", self.new, QKeySequence.New)
@@ -894,18 +918,17 @@ class MainWindow(QMainWindow):
         self.undo_act = act("Undo", self.undo, QKeySequence.Undo)
         self.redo_act = act("Redo", self.redo, "Ctrl+Y")
         tb.addSeparator()
-        act("Reset", self.reset, None).setToolTip("Reset all parameters to defaults")
-        act("Randomize", self.randomize, None).setToolTip("Randomize the current mode's parameters")
-        tb.addSeparator()
+        act("Randomize", self.randomize, None).setToolTip("Random settings for the current layout and hole shape")
         self.ruler_act = act("Ruler", lambda on: self.set_tool("ruler" if on else None), "R", True)
-        self.draw_act = act("Draw outline", lambda on: self.set_tool("draw" if on else None), "B", True)
-        self.keep_act = act("Keep-out", lambda on: self.set_tool("keepout" if on else None), "K", True)
-        act("Zoom to fit", self.canvas.zoom_fit, "Z")
-        act("Fan grille…", self.fan_dialog).setToolTip("Plate for a standard fan: blade opening and 4 screw holes")
+        self.draw_act = act("Draw outline", lambda on: self.start_draw("outline") if on else self.set_tool(None),
+                            "B", True, shown=False)
+        self.keep_act = act("Keep-out area", lambda on: self.set_tool("keepout" if on else None), "K", True,
+                            shown=False)
+        act("Zoom to fit", self.canvas.zoom_fit, "Z", shown=False)
         tb.addSeparator()
         menu_btn = QToolButton(text="  Export  ", popupMode=QToolButton.InstantPopup)
         menu_btn.setObjectName("export")
-        m = self.menuBar().addMenu("&Export")
+        m = QMenu(self)
         for ext in (".png", ".svg", ".dxf", ".step", ".stl"):
             m.addAction(ext[1:].upper() + "…", lambda e=ext: self.export_as(e))
         m.addSeparator()
@@ -935,9 +958,9 @@ class MainWindow(QMainWindow):
         self.bindings.append((path, w))
         return w
 
-    def field_widget(self, path, name, t):
+    def field_widget(self, path, name, t, text=None):
         if t is bool:
-            w = QCheckBox()
+            w = QCheckBox(text or label_for(name, path))
             w.toggled.connect(lambda v, p=path: self.set_param(p, bool(v)))
         elif t in (int, float):
             w = slider_field(path, name, t, self.design.canvas)
@@ -946,54 +969,71 @@ class MainWindow(QMainWindow):
             opts = CHOICES.get(path) or CHOICES[name]
             icons = choice_icons(path)
             if icons or len(opts) <= 4:
-                w = Picker([(c, c.replace("_", " ").replace("rounded rectangle", "rounded").capitalize(),
-                             icons.get(c) if icons else None) for c in opts],
+                w = Picker([(c, choice_text(path, c), icons.get(c) if icons else None) for c in opts],
                            cols=(5 if path == "pattern.mode" else 3) if icons else None)
                 w.valueChanged.connect(lambda v, p=path: self.set_param(p, v))
             else:
                 w = QComboBox()
                 for c in opts:
-                    w.addItem(c.replace("_", " "), c)
+                    w.addItem(choice_text(path, c), c)
                 w.currentIndexChanged.connect(lambda i, p=path, w=w: self.set_param(p, w.itemData(i)))
-        elif t is str:
+        else:
             w = QLineEdit()
             w.editingFinished.connect(lambda p=path, w=w: self.set_param(p, w.text()))
-        else:  # point lists: edited on the canvas / via file or MCP
-            w = QLabel()
+        if tip := TIPS.get(path) or TIPS.get(name):
+            w.setToolTip(tip)
         return self.bind(w, path)
 
-    def form(self, path, cls, skip=(), only=None):
-        """Basic fields in the returned form; rarely needed ones (ADVANCED) in a folded 'More options'."""
-        def mk():
-            f = QFormLayout()
-            f.setContentsMargins(4, 2, 4, 2)
-            f.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-            f.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            return f
+    def add_row(self, lay, path, t, label=None):
+        """One labelled control, registered under its path so refresh_aux can hide it when it cannot matter."""
+        name = path.rsplit(".", 1)[-1]
+        w = self.field_widget(path, name, t, label)
+        if t is bool:
+            lay.addRow(w)
+            self.rows[path] = [(lay, w)]
+            return w
+        lab = QLabel(label or label_for(name, path))
+        lab.setToolTip(w.toolTip())
+        if isinstance(w, Picker) and w.tiles:  # picture tiles get the full width
+            lay.addRow(lab)
+            lay.addRow(w)
+            self.rows[path] = [(lay, lab), (lay, w)]
+        else:
+            lay.addRow(lab, w)
+            self.rows[path] = [(lay, w)]
+        return w
+
+    def add_extra(self, lay, key, *ws, at=None):
+        """Buttons or notes that belong to a parameter (key), hidden together with it."""
+        for i, w in enumerate(ws):
+            lay.addRow(w) if at is None else lay.insertRow(at + i, w)
+            self.rows.setdefault(key, []).append((lay, w))
+
+    def form(self, path, cls, skip=()):
+        """A form for one part of the design; rarely needed fields (ADVANCED) go in a folded 'More options'."""
         w = QWidget()
         outer = QVBoxLayout(w)
         outer.setContentsMargins(0, 0, 0, 0)
-        f, adv = mk(), mk()
+        f, adv, more = form_layout(), form_layout(), []
         outer.addLayout(f)
         hints = get_type_hints(cls)
-        rows = {}
         for fl in fields(cls):
-            if fl.name in skip or (only and fl.name not in only) or is_dataclass(hints[fl.name]):
-                continue
             t = getattr(hints[fl.name], "__origin__", hints[fl.name])
-            fw = self.field_widget(f"{path}.{fl.name}" if path else fl.name, fl.name, t)
-            target = adv if fl.name in ADVANCED else f
-            if isinstance(fw, Picker) and fw.btns and next(iter(fw.btns.values())).property("tile"):
-                target.addRow(QLabel(label_for(fl.name)))
-                target.addRow(fw)  # picture tiles get the full width
+            if fl.name in skip or is_dataclass(hints[fl.name]) or t is list:
+                continue
+            p = f"{path}.{fl.name}"
+            if fl.name in ADVANCED or p in ADVANCED:
+                self.add_row(adv, p, t)
+                more.append(p)
             else:
-                target.addRow(QLabel(label_for(fl.name)), fw)
-            rows[fl.name] = fw
-        if adv.rowCount():
+                self.add_row(f, p, t)
+        if more:
             body = QWidget()
             body.setLayout(adv)
-            outer.addWidget(Section("More options", body, False, small=True))
-        return w, f, rows
+            sec = Section("More options", body, False, small=True)
+            outer.addWidget(sec)
+            self.more.append((sec, more))
+        return w, f
 
     def _left_dock(self):
         # library
@@ -1007,88 +1047,169 @@ class MainWindow(QMainWindow):
         self.lib_list.itemClicked.connect(self.library_clicked)
         self.lib_folder = Path(self.settings.value("library", str(Path.home() / "Documents" / "VentForge")))
         self.lib_label = QLabel(wordWrap=True)
+        v.addWidget(note("Click a design to start from it. Your own designs are saved in the folder below."))
         v.addWidget(self.lib_list)
         v.addWidget(self.lib_label)
         v.addWidget(row(button("Save to library", self.save_to_library),
                         button("Folder…", self.pick_library_folder), button("↻", self.refresh_library, "Refresh")))
-        # canvas
-        cw, cf, _ = self.form("canvas", type(self.design.canvas))
-        self.link_cb = QCheckBox("Link width/height (keep aspect)")
-        cf.addRow(self.link_cb)
-        name = self.field_widget("name", "name", str)
-        cf.insertRow(0, "Name", name)
-        mw = self.field_widget("min_wall", "min_wall", float)
-        cf.addRow(DragLabel("Min wall", mw), mw)
-        # boundary
-        bw, bf, _ = self.form("boundary", type(self.design.boundary))
-        bf.addRow(row(button("Draw outline", lambda: self.draw_act.trigger(),
-                             "Click points on the canvas; double-click, Enter or right-click to finish"),
-                      button("Clear outline", lambda: self.set_param("boundary.points", []))))
-        bf.addRow("Keep-outs", self.field_widget("keepouts", "keepouts", list))
-        bf.addRow(row(button("Clear keep-outs", lambda: self.set_param("keepouts", []),
-                             "Screw holes and hole-free areas (set by Fan grille or the MCP server)")))
-        mcw, _, _ = self.form("machining", Machining)
-        # background
-        gw = QWidget()
-        gf = QFormLayout(gw)
-        self.bg_label = QLabel(wordWrap=True)
-        op = self.field_widget("background.opacity", "opacity", float)
+        # plate: size and outline
+        pw, pf = QWidget(), form_layout()
+        pw.setLayout(pf)
+        self.add_row(pf, "name", str, "Name")
+        self.add_row(pf, "canvas.width", float)
+        self.add_row(pf, "canvas.height", float)
+        self.link_cb = QCheckBox("Keep proportions")
+        pf.addRow(self.link_cb)
+        self.add_row(pf, "boundary.type", str)
+        self.add_row(pf, "boundary.corner_radius", float)
+        self.add_extra(pf, "boundary.points", note("Click the corners on the canvas; Enter or double-click finishes."),
+                       row(button("Draw outline", lambda: self.start_draw("outline")),
+                           button("Clear", self.clear_outline)))
+        self.add_row(pf, "boundary.margin", float)
+        self.add_row(pf, "boundary.clip", bool)
+        pf.addRow(button("Make it a fan grille…", self.fan_dialog,
+                         "Plate for a standard fan: blade opening and 4 screw holes; the hole pattern stays"))
+        self.add_row(pf, "boundary.vent_diameter", float)
+        # keep-out areas
+        kw, kf = QWidget(), form_layout()
+        kw.setLayout(kf)
+        self.keep_label = note("")
+        kf.addRow(self.keep_label)
+        kf.addRow(row(button("Draw keep-out", lambda: self.keep_act.trigger(),
+                             "Drag on the canvas (Shift: circle from its centre). Right-click one to remove it. (K)"),
+                      button("Clear all", lambda: self.set_param("keepouts", []))))
+        # making it: 3D, machines, checks
+        mw, mf = QWidget(), form_layout()
+        mw.setLayout(mf)
+        mf.addRow(note("For exports and the checks. Except the CNC tool radius, these do not move holes "
+                       "in the preview."))
+        self.add_row(mf, "canvas.relief", str)
+        self.add_row(mf, "canvas.relief_depth", float)
+        self.add_row(mf, "canvas.thickness", float)
+        mf.addRow(heading("Machines"))
+        self.add_row(mf, "machining.tool_radius", float)
+        self.add_row(mf, "machining.kerf", float)
+        mf.addRow(heading("Checks"))
+        self.add_row(mf, "min_wall", float)
+        self.add_row(mf, "machining.min_feature", float)
+        # reference image
+        gw, gf = QWidget(), form_layout()
+        gw.setLayout(gf)
+        self.bg_label = note("")
         gf.addRow(self.bg_label)
-        gf.addRow(DragLabel("Opacity", op), op)
+        self.add_row(gf, "background.opacity", float, "Opacity")
         gf.addRow(row(button("Load image…", self.load_background),
                       button("Clear", lambda: self.set_param("background.image", ""))))
-        self._dock("Design", [Section("Library", lib), Section("Canvas", cw), Section("Boundary", bw),
-                              Section("Machining", mcw, False), Section("Background image", gw, False)], Qt.LeftDockWidgetArea)
+        self._dock("Plate", [Section("Library", lib), Section("Size and outline", pw), Section("Keep-out areas", kw),
+                             Section("Making it", mw), Section("Reference image", gw, False)],
+                   Qt.LeftDockWidgetArea)
+
+    def _gradient_tab(self, g):
+        title, info, at_label, far_label = GRAD_INFO[g]
+        p = f"gradients.{g}."
+        w, f = QWidget(), form_layout()
+        w.setLayout(f)
+        f.addRow(note(info + " Changing anything here switches it on."))
+        self.add_row(f, p + "enabled", bool, f"Use the {title.lower()} variation")
+        if g == "shape":
+            self.add_row(f, "gradients.target_shape", str)
+            self.add_row(f, "gradients.target_sides", int)
+            self.add_extra(f, "gradients.shape.same", note("The holes already have this shape: pick another one "
+                                                           "to morph into."))
+        top, bw, f = f, QWidget(), form_layout()  # everything below is hidden when it cannot do anything
+        bw.setLayout(f)
+        self.add_extra(top, p + "body", bw)
+        self.add_row(f, p + "edge", float, far_label)
+        gw = self.gw[g] = {}
+        # controls: points / lines / curves on the canvas where the value differs
+        cw, cf = QWidget(), form_layout()
+        cw.setLayout(cf)
+        cf.addRow(heading("Controls on the canvas"))
+        lst = gw["list"] = QListWidget()
+        lst.setMaximumHeight(90)
+        lst.currentRowChanged.connect(lambda i: self.select_control(i))
+        cf.addRow(lst)
+        cf.addRow(row(*(button(f"+ {k}", lambda _=0, k=k: self.add_control(g, k), f"Add a {k}; drag its handles")
+                        for k in ("point", "line", "curve")),
+                      button("Delete", lambda _=0: self.delete_control(g))))
+        for key, label in (("value", at_label), ("radius", "Reach")):
+            sp = gw[key] = slider_field(f"{p}{key}", key, float, self.design.canvas)
+            sp.valueChanged.connect(lambda v, key=key: self.set_control_attr(g, key, v))
+            sp.setToolTip(TIPS.get(key, ""))
+            cf.addRow(QLabel(label), sp)
+        self.add_row(cf, p + "falloff", str)
+        self.add_extra(f, p + "controls", cw)
+        # randomness
+        f.addRow(heading("Randomness"))
+        self.add_row(f, p + "noise", float)
+        self.add_row(f, p + "noise_scale", float)
+        self.add_extra(f, p + "noise_seed", button("New random variant", lambda: self.set_param(
+            p + "noise_seed", random.randint(1, 99999))))
+        # image
+        f.addRow(heading("Image"))
+        gw["img"] = note("")
+        f.addRow(gw["img"])
+        f.addRow(row(button("Load image…", lambda: self.load_grad_image(g)),
+                     button("Clear", lambda: self.set_param(p + "image", ""))))
+        self.add_row(f, p + "image_min", float)
+        self.add_row(f, p + "image_max", float)
+        self.add_row(f, p + "invert_image", bool)
+        return w
 
     def _right_dock(self):
+        # layout
+        lw = QWidget()
+        lv = QVBoxLayout(lw)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.addWidget(self.field_widget("pattern.mode", "mode", str))
+        self.mode_info = note("")
+        lv.addWidget(self.mode_info)
+        self.mode_stack = Pages()
+        hints = get_type_hints(Pattern)
+        for m in MODES:
+            w, f = self.form(f"pattern.{m}", hints[m])
+            if m == "path":
+                self.path_note = note("")
+                self.add_extra(f, "pattern.path.draw", self.path_note,
+                               row(button("Draw path", lambda: self.start_draw("path"),
+                                          "Click along the path on the canvas; Enter or double-click finishes"),
+                                   button("Clear", lambda: self.set_param("pattern.path.points", []))), at=0)
+            elif m == "custom_points":
+                self.points_note = note("")
+                self.add_extra(f, "pattern.custom_points.draw", self.points_note,
+                               row(button("Click points", lambda: self.start_draw("points"),
+                                          "Click where holes go; Enter finishes"),
+                                   button("Clear", lambda: self.set_param("pattern.custom_points.points", []))))
+            self.mode_stack.addWidget(w)
+        lv.addWidget(self.mode_stack)
+        # holes
+        hw = QWidget()
+        hv = QVBoxLayout(hw)
+        hv.setContentsMargins(0, 0, 0, 0)
+        self.own_note = note("")
+        hv.addWidget(self.own_note)
+        self.dot_body, df = QWidget(), form_layout()
+        self.dot_body.setLayout(df)
+        hv.addWidget(self.dot_body)
+        for n, t in (("shape", str), ("diameter", float), ("aspect", float), ("corner_radius", float),
+                     ("sides", int), ("star_points", int), ("star_inner", float), ("rotation", float)):
+            self.add_row(df, f"dot.{n}", t)
+        self.shape_note = note("")
+        self.add_extra(df, "dot.custom_points", self.shape_note,
+                       button("Draw hole shape", lambda: self.start_draw("hole"),
+                              "Click the corners on the canvas at any size; Enter or double-click finishes"), at=2)
+        self.color_btn = button("", self.pick_color, "Colour of the holes in the preview")
+        cf = form_layout()  # outside dot_body: Cracks and Slots are coloured too
+        cf.addRow("Preview colour", self.color_btn)
+        hv.addLayout(cf)
+        # variation (gradients)
         self.grad_tabs = QTabWidget()
         self.gw = {}
         for g in GRADS:
-            w, f, rows = self.form(f"gradients.{g}", Gradient, skip=("controls", "image"))
-            gw = self.gw[g] = {}
-            f.insertRow(4, "", button("Reseed noise", lambda _=0, g=g: self.set_param(
-                f"gradients.{g}.noise_seed", random.randint(1, 99999))))
-            gw["img"] = QLabel(wordWrap=True)
-            f.addRow("Image", gw["img"])
-            f.addRow(row(button("Load image…", lambda _=0, g=g: self.load_grad_image(g)),
-                         button("Clear", lambda _=0, g=g: self.set_param(f"gradients.{g}.image", ""))))
-            lst = gw["list"] = QListWidget()
-            lst.setMaximumHeight(110)
-            lst.currentRowChanged.connect(lambda i, g=g: self.select_control(i))
-            f.addRow(QLabel("<b>Controls</b>"))
-            f.addRow(lst)
-            f.addRow(row(*(button(k.capitalize(), lambda _=0, g=g, k=k: self.add_control(g, k), f"Add {k}")
-                           for k in ("point", "line", "curve")),
-                         button("Delete", lambda _=0, g=g: self.delete_control(g))))
-            for key, label in (("value", "Strength at control"), ("radius", "Reach")):
-                sp = gw[key] = slider_field(f"gradients.{g}.{key}", key, float, self.design.canvas)
-                sp.valueChanged.connect(lambda v, g=g, key=key: self.set_control_attr(g, key, v))
-                f.addRow(QLabel(label), sp)
-            if g == "shape":
-                for n in ("target_shape", "target_sides"):
-                    fw = self.field_widget(f"gradients.{n}", n, str if n == "target_shape" else int)
-                    f.addRow(DragLabel(label_for(n), fw), fw)
-            self.grad_tabs.addTab(w, g.capitalize())
+            self.grad_tabs.addTab(self._gradient_tab(g), GRAD_INFO[g][0])
         self.grad_tabs.currentChanged.connect(lambda _: self.refresh_handles())
-        # dot style
-        dw, self.dot_form, self.dot_rows = self.form("dot", DotStyle, skip=("custom_points", "color"))
-        self.color_btn = button("", self.pick_color, "Hole display colour")
-        self.dot_form.addRow("Color", self.color_btn)
-        # pattern
-        pw = QWidget()
-        pv = QVBoxLayout(pw)
-        mode = self.field_widget("pattern.mode", "mode", str)
-        self.mode_stack = QStackedWidget()
-        hints = get_type_hints(Pattern)
-        for m in MODES:
-            w, f, rows = self.form(f"pattern.{m}", hints[m])
-            if m == "grid":
-                self.grid_form, self.grid_rows = f, rows
-            self.mode_stack.addWidget(w)
-        pv.addWidget(mode)
-        pv.addWidget(self.mode_stack)
-        self._dock("Pattern", [Section("Pattern mode", pw), Section("Dot style", dw),
-                               Section("Gradients", self.grad_tabs)], Qt.RightDockWidgetArea)
+        self._dock("Pattern", [Section("Layout", lw), Section("Holes", hw), Section("Variation", self.grad_tabs)],
+                   Qt.RightDockWidgetArea)
 
     def _statusbar(self):
         sb = self.statusBar()
@@ -1112,10 +1233,6 @@ class MainWindow(QMainWindow):
                 w.setValue(v)
             elif isinstance(w, QLineEdit):
                 w.setText(str(v))
-            elif isinstance(w, QLabel):
-                w.setText(f"{len(v)} {'keep-out' if path == 'keepouts' else 'point'}(s)" + (" — draw with K, right-click to remove"
-                          if path == 'keepouts' else " — edit via file / MCP")
-                          if v else "none (default)")
             w.blockSignals(False)
         for w in self.findChildren(SliderField):  # canvas-relative slider ranges
             if getattr(w, "path", None) in SCALE:
@@ -1126,20 +1243,47 @@ class MainWindow(QMainWindow):
         self.refresh_aux()
 
     def refresh_aux(self):
+        """Show only what can change the current design, and the notes that go with it."""
         d = self.design
-        for n, w in self.dot_rows.items():
-            if n not in ("shape", "diameter", "rotation"):
-                self.dot_form.setRowVisible(w, n in DOT_VIS.get(d.dot.shape, ()))
+        hide = hidden(d)
+        for key, items in self.rows.items():
+            for lay, w in items:
+                lay.setRowVisible(w, key not in hide)
+        for sec, paths in self.more:
+            sec.setVisible(any(p not in hide for p in paths))
+        own = "dot" in hide
+        self.dot_body.setVisible(not own)
+        self.own_note.setVisible(own)
+        self.own_note.setText(f"{choice_text('pattern.mode', d.pattern.mode)} makes its own hole shapes: "
+                              "set them under Layout.")
+        self.mode_info.setText(MODE_INFO.get(d.pattern.mode, ""))
+        self.shape_note.setText(f"Drawn shape: {len(d.dot.custom_points)} corners." if len(d.dot.custom_points) >= 3
+                                else "No shape drawn yet, so the holes are round.")
+        n = len(d.pattern.path.points)
+        self.path_note.setText(f"Path: {n} points." if n >= 2 else "No path drawn yet, so the holes go round in a circle.")
+        n = len(d.pattern.custom_points.points)
+        self.points_note.setText(f"{n} points." if n else "No points yet: click them on the canvas.")
+        k = len(d.keepouts)
+        self.keep_label.setText((f"{k} area{'s' if k != 1 else ''} without holes. " if k else
+                                 "Areas without holes, for screws, labels or clips. ")
+                                + "Drag on the canvas to add one (Shift: circle), right-click one to remove it.")
+        for i, g in enumerate(GRADS):
+            self.grad_tabs.setTabVisible(i, f"gradients.{g}" not in hide)
+            self.grad_tabs.setTabText(i, GRAD_INFO[g][0] + (" ●" if getattr(d.gradients, g).enabled else ""))
+            img = getattr(d.gradients, g).image
+            self.gw[g]["img"].setText(f"Image: {Path(img).name}. It replaces the controls; black and white map to "
+                                      "the values below." if img else "Or use a grayscale image across the plate.")
+        if not self.grad_tabs.isTabVisible(self.grad_tabs.currentIndex()):
+            self.grad_tabs.setCurrentIndex(0)
+        for w in self.findChildren(SliderField):
+            if s := fill_soft(getattr(w, "path", ""), d):
+                w.set_soft(s)
         self.color_btn.setText(d.dot.color)
         self.color_btn.setStyleSheet(f"background:{d.dot.color};color:white")
         self.mode_stack.setCurrentIndex(MODES.index(d.pattern.mode) if d.pattern.mode in MODES else 0)
-        # hexagon pitch is derived from spacing_x alone
-        self.grid_form.setRowVisible(self.grid_rows["spacing_y"], d.pattern.grid.arrangement != "hexagon")
         self.holes_color()
-        for g in GRADS:
-            img = getattr(d.gradients, g).image
-            self.gw[g]["img"].setText(Path(img).name if img else "none")
-        self.bg_label.setText(Path(d.background.image).name if d.background.image else "No image")
+        self.bg_label.setText(f"Image: {Path(d.background.image).name}" if d.background.image else
+                              "A photo or drawing under the plate, to trace or line up with.")
         key = (d.background.image, d.canvas.width, d.canvas.height, d.background.opacity)
         if key != self.bg_key:
             self.bg_key = key
@@ -1165,8 +1309,13 @@ class MainWindow(QMainWindow):
                 c.height = round(v * r, 3)
             else:
                 c.width = round(v / r, 3)
+        auto = switch_on(self.design, path, v)
         setp(self.design, path, v)
-        self.changed(sync=linked or path.startswith("canvas.") or path.endswith(("noise_seed", ".points")))
+        self.changed(sync=linked or auto or path.startswith("canvas.") or path.endswith(("noise_seed", ".points")))
+        if (target := DRAW_ON_PICK.get((path, v))) and not getp(self.design, DRAW_POINTS[target]):
+            self.start_draw(target)  # picking "Drawn" or "Your points" with nothing drawn yet: draw right away
+        elif self.canvas.tool == "draw" and any(p == path and self.draw_target == t for (p, _), t in DRAW_ON_PICK.items()):
+            self.set_tool(None)  # picked something else before finishing that drawing
 
     def changed(self, sync=False):
         if sync:
@@ -1230,11 +1379,6 @@ class MainWindow(QMainWindow):
             self.set_design(Design.from_dict(json.loads(self.hist[self.hpos])), record=False)
             self.dirty = True
             self.autosave()
-
-    def reset(self):
-        self.set_design(Design())
-        self.dirty = True
-        self.autosave()
 
     def randomize(self):
         d = clone(self.design)
@@ -1340,15 +1484,43 @@ class MainWindow(QMainWindow):
     # ---------------- canvas tools
     def set_tool(self, tool):
         self.ruler_act.setChecked(tool == "ruler")
-        self.draw_act.setChecked(tool == "draw")
+        self.draw_act.setChecked(tool == "draw" and self.draw_target == "outline")
         self.keep_act.setChecked(tool == "keepout")
         self.canvas.set_tool(tool)
         if tool == "keepout":
             self.statusBar().showMessage("Drag a hole-free rectangle (Shift: circle from its centre); right-click one to"
                                          " remove it, Esc to finish")
         if tool == "draw":
-            self.statusBar().showMessage("Click to add outline points; double-click / Enter / right-click to finish,"
-                                         " Esc to cancel")
+            self.statusBar().showMessage(DRAW[self.draw_target][1] + "; Enter, double-click or right-click finishes,"
+                                         " Esc cancels")
+
+    def start_draw(self, target):
+        self.draw_target = target
+        self.set_tool("draw")
+
+    def finish_drawing(self, pts):
+        """Points clicked on the canvas become the outline, the path, the custom points or the hole shape."""
+        need, _ = DRAW[self.draw_target]
+        if len(pts) < need:
+            self.statusBar().showMessage(f"Needs at least {need} points; nothing changed.", 5000)
+            return
+        d, t = self.design, self.draw_target
+        if t == "outline":
+            d.boundary.points, d.boundary.type = pts, "custom"
+        elif t == "path":
+            d.pattern.path.points = pts
+        elif t == "points":
+            cp = d.pattern.custom_points
+            cp.points, cp.sizes, cp.angles = pts, [], []
+        else:
+            d.dot.custom_points, d.dot.shape = pts, "custom"
+        self.changed(sync=True)
+        self.commit()
+
+    def clear_outline(self):
+        self.design.boundary.points, self.design.boundary.type = [], "none"
+        self.changed(sync=True)
+        self.commit()
 
     def fan_dialog(self):
         sizes = [f"{s} mm" for s in FANS]
@@ -1373,12 +1545,6 @@ class MainWindow(QMainWindow):
             del self.design.keepouts[hit[-1]]  # the topmost (last drawn)
             self.changed(sync=True)
             self.commit()
-
-    def set_custom_boundary(self, pts):
-        self.design.boundary.points = pts
-        self.design.boundary.type = "custom"
-        self.changed(sync=True)
-        self.commit()
 
     # ---------------- regeneration
     def run_task(self, fn, cb):
@@ -1415,13 +1581,13 @@ class MainWindow(QMainWindow):
         self.result = r
         self.canvas.set_result(holes, outline, self.design.dot.color)
         s = r.stats
-        self.st["count"].setText(f"{s.get('count', len(r.holes))} dots")
+        self.st["count"].setText(f"{s.get('count', len(r.holes))} holes")
         self.st["open"].setText(f"open {100 * s.get('open_area_ratio', 0):.1f} %"
                                 + (f"  ·  fan {100 * s['fan_open_ratio']:.0f} % open" if "fan_open_ratio" in s else "")
                                 + (f"  ·  {s['dropped_by_tool']} too small for the tool" if s.get("dropped_by_tool") else ""))
         v = s.get("min_wall_violations", 0)
         tw = s.get("thinnest_wall")
-        self.st["viol"].setText(f"min-wall violations {v}" + (f"  ·  thinnest wall {tw:.2f} mm" if tw else "")
+        self.st["viol"].setText(f"{v} walls under {self.design.min_wall:g} mm" + (f"  ·  thinnest wall {tw:.2f} mm" if tw else "")
                                 + (f"  ·  {s['below_min_feature']} holes below min feature"
                                    if s.get("below_min_feature") else "")
                                 + (f"  ·  airflow loss {s['pressure_drop_pa']:.0f} Pa @2 m/s"
@@ -1509,7 +1675,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Save failed", f"{p}\n\n{e}")
             return False
-        Path(p + ".saved").touch()  # marks a manual save: the Fusion add-in rebuilds only on these, not on autosaves
+        mark_saved(p)
         self.watch(p)
         self.dirty = False
         self.update_title()
@@ -1747,6 +1913,8 @@ QTabBar::tab:selected {{ background:{ACCENT}; color:white; font-weight:bold; }}
 QWidget#zoombar {{ background:rgba(40,41,45,220); border:1px solid #4a4b52; border-radius:8px; }}
 QWidget#zoombar QToolButton {{ background:transparent; border:none; font-size:12pt; padding:0 6px; }}
 QWidget#zoombar QToolButton:hover {{ background:#4a4b52; border-radius:5px; }}
+QLabel[note="true"] {{ color:#9a9aa2; font-size:9pt; }}
+QLabel[heading="true"] {{ color:#cfcfd4; font-weight:bold; padding-top:6px; }}
 QToolBar {{ spacing:4px; padding:4px; background:#26272b; border:none; }}
 """
 

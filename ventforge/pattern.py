@@ -2,7 +2,7 @@
 
     generate(design) -> Result         the whole pipeline
     outline_of(design) -> Polygon      plate outline (canvas rect or boundary shape)
-    sample_gradient(g, xy, canvas, neutral) -> ndarray   evaluate one gradient field at points
+    sample_gradient(g, xy, canvas, neutral, span) -> ndarray   evaluate one gradient field at points
 
 Pipeline for dot modes: mode points (+angle, +size multiplier) -> spacing warp -> size/angle/shape
 fields -> one template outline per dot, built vectorised with numpy + shapely.polygons ->
@@ -170,8 +170,9 @@ def _image_field(g: Gradient, xy, canvas: Canvas):
     return g.image_min + (g.image_max - g.image_min) * v
 
 
-def sample_gradient(g: Gradient, xy, canvas: Canvas, neutral: float = 1.0) -> np.ndarray:
-    """Field value at points xy (N,2). Disabled -> `neutral` everywhere."""
+def sample_gradient(g: Gradient, xy, canvas: Canvas, neutral: float = 1.0, span: float = 0.0) -> np.ndarray:
+    """Field value at points xy (N,2). Disabled -> `neutral` everywhere. Noise scales the value, or with
+    `span` (for fields that are 0 when neutral, like angle) adds up to ±noise·span."""
     xy = np.asarray(xy, float).reshape(-1, 2)
     if not g.enabled:
         return np.full(len(xy), float(neutral))
@@ -191,7 +192,8 @@ def sample_gradient(g: Gradient, xy, canvas: Canvas, neutral: float = 1.0) -> np
             v[upd] = g.edge + (c.value - g.edge) * w[upd]
             best = np.maximum(best, w)
     if g.noise:
-        v = v * (1 + g.noise * _value_noise(xy, g.noise_scale, g.noise_seed))
+        n = g.noise * _value_noise(xy, g.noise_scale, g.noise_seed)
+        v = v + n * span if span else v * (1 + n)
     return v
 
 
@@ -805,7 +807,7 @@ def generate(design: Design) -> Result:
         return _finish(design, outline, [], [])
     shapely.prepare(inner)
     d = dot.diameter
-    reach = d * max(1.0, dot.aspect) * _gmax(gr.size, 1.0)
+    reach = d * (max(1.0, dot.aspect) if dot.shape == "rounded_rectangle" else 1.0) * _gmax(gr.size, 1.0)
     x0, y0, x1, y1 = outline.bounds
     pad = reach
     warp = gr.spacing.enabled and mode in WARP_MODES
@@ -847,11 +849,11 @@ def generate(design: Design) -> Result:
     sz = sz * sample_gradient(gr.size, xy, design.canvas, 1.0)
     m = sz * d > MIN_DOT
     xy, ang, sz = xy[m], ang[m], sz[m]
-    ang = ang + dot.rotation + sample_gradient(gr.angle, xy, design.canvas, 0.0)
+    ang = ang + dot.rotation + sample_gradient(gr.angle, xy, design.canvas, 0.0, 90.0)
 
     base = _template(dot.shape, dot, d)
     if gr.shape.enabled:
-        t = np.clip(sample_gradient(gr.shape, xy, design.canvas, 0.0), 0, 1)
+        t = np.clip(sample_gradient(gr.shape, xy, design.canvas, 0.0, 1.0), 0, 1)
         a, tgt = _morph_pair(base, _template(gr.target_shape, DotStyle(
             sides=gr.target_sides, star_points=dot.star_points, star_inner=dot.star_inner), d))
         holes = _build_dots(xy, sz, ang, a, tgt, t)

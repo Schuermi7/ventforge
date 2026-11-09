@@ -82,7 +82,7 @@ def test_fan_grille_tool_saves_and_reports_airflow(tmp_path):
 
 def test_library_round_trip(tmp_path, monkeypatch):
     from ventforge import mcp_server as m
-    monkeypatch.setattr(m, "HOME", tmp_path)
+    monkeypatch.setattr(m, "_library", lambda: tmp_path)
     m.new_design(path=str(tmp_path / "work.vent.json"))
     m.fan_grille(92)
     m.save_to_library("92mm case X")
@@ -92,3 +92,26 @@ def test_library_round_trip(tmp_path, monkeypatch):
     for bad in ("../evil", "a/b", ""):
         with pytest.raises(ValueError):
             m.save_to_library(bad)
+
+
+def test_set_params_reports_no_effect_and_switches_variations_on(tmp_path):
+    from ventforge import mcp_server as m
+    m.new_design(path=str(tmp_path / "d.vent.json"))  # round holes on a grid
+    out = m.set_params({"dot": {"star_inner": 0.3, "diameter": 3}, "pattern": {"spiral": {"turns": 4}},
+                        "gradients": {"size": {"noise": 0.4}}})
+    assert sorted(out["no_effect"]) == ["dot.star_inner", "pattern.spiral.turns"]
+    assert m.get_design()["design"]["gradients"]["size"]["enabled"]  # like the editor: touching it switches it on
+    m.set_params({"gradients": {"spacing": {"noise": 0.4, "enabled": False}}})
+    assert not m.get_design()["design"]["gradients"]["spacing"]["enabled"]  # an explicit off wins
+    assert "no_effect" not in m.set_params({"dot": {"shape": "star", "star_inner": 0.3}})
+    assert "Inner size" in m.describe_parameters()["help"]["dot.star_inner"]
+
+
+def test_apply_to_fusion_marks_a_manual_save(tmp_path):
+    from ventforge import mcp_server as m
+    p = tmp_path / "d.vent.json"
+    m.new_design(path=str(p))
+    m.set_params({"dot": {"diameter": 3}})
+    assert not (tmp_path / "d.vent.json.saved").exists()  # in-between saves do not rebuild Fusion parts
+    m.apply_to_fusion()
+    assert (tmp_path / "d.vent.json.saved").exists()

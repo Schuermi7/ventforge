@@ -21,7 +21,7 @@ design file.
   kerf compensation for SVG/DXF. Set a minimum feature (about 2× nozzle for 3D printing) to flag holes
   that would close up.
 - **Textures:** instead of cutting through, sink the pattern into the top (deboss) or raise it (emboss) by
-  a set depth, for grips, decorative panels and labels (Canvas → Relief).
+  a set depth, for grips, decorative panels and labels (Plate → Making it).
 - **Export:** PNG, SVG, DXF, STEP, STL. You can also wrap the pattern onto a tube or cut it into an
   existing STEP part.
 - **Checks:** hole count, open area, the thinnest wall in mm (marked on the canvas), and warnings where walls
@@ -62,9 +62,26 @@ ventforge
 
 To open a saved design, pass its file: `ventforge my_vent.vent.json`.
 
-1. Pick a preset or a layout mode in the side panel.
+1. Pick a design from the **Library**, or a layout under **Pattern → Layout**.
 2. Drag the sliders. The preview updates as you go.
-3. Pick a file type from the **Export** menu.
+3. Pick a file type from the green **Export** button.
+
+The panel only shows settings that change something for the current design. Pick *Star* holes and
+the star settings appear; pick *Cracks* or *Slots* and the hole settings go away, because those
+layouts make their own shapes. Hover over a setting for a short explanation.
+
+| Panel | What you set there |
+|-------|--------------------|
+| **Plate → Size and outline** | Width, height, outline (rectangle, circle, rounded, or one you draw), edge margin, *Make it a fan grille…* |
+| **Plate → Keep-out areas** | Areas without holes, for screws, labels or clips |
+| **Plate → Making it** | Cut through, sunk in or raised; thickness; CNC tool radius and laser kerf; the checks for thin walls and small holes |
+| **Plate → Reference image** | A photo or drawing under the plate, to trace or line up with |
+| **Pattern → Layout** | How holes are placed: grid, random, along a path, spiral, rings, sunflower, crossing lines, cracks, slots, or your own points |
+| **Pattern → Holes** | Hole shape and size |
+| **Pattern → Variation** | Make holes bigger or smaller, closer or further apart, turned, or morphed into another shape in places. Place controls on the canvas, add randomness, or use a grayscale image |
+
+Changing a setting in a Variation tab switches that variation on (the tab then shows a ●). Picking a
+*Drawn* outline or hole shape, or the *Your points* layout, starts drawing on the canvas right away.
 
 **Canvas controls**
 
@@ -75,6 +92,7 @@ To open a saved design, pass its file: `ventforge my_vent.vent.json`.
 | Zoom to fit       | `Z`, or double-click empty space                              |
 | Measure           | `R` (ruler)                                                   |
 | Draw an outline   | `B`, click the points, `Enter` to finish, `Esc` to cancel     |
+| Keep-out area     | `K`, drag (`Shift`: circle), right-click one to remove it     |
 | Undo / redo       | `Ctrl+Z` / `Ctrl+Y`                                           |
 
 Your design saves itself shortly after each change.
@@ -109,9 +127,11 @@ The assistant works on `~/Documents/VentForge/current.vent.json`. If you open th
 (or ask the assistant to "open it in the GUI"), you can watch the design change live.
 
 **Tools the server offers:** `new_design`, `open_design`, `list_presets`, `save_to_library`, `get_design`,
-`describe_parameters`, `set_params`, `add_control`, `clear_controls`, `fan_grille`,
-`fit_open_area` (solve a parameter for a target open area), `preview`, `export`,
-`wrap_cylinder`, `cut_into_part`, `open_in_gui`.
+`describe_parameters` (every setting with its editor name and what it does), `set_params` (also tells
+the assistant which of its settings do nothing for this design), `add_control`, `clear_controls`,
+`fan_grille`, `fit_open_area` (solve a parameter for a target open area), `preview`, `export`,
+`wrap_cylinder`, `cut_into_part`, `apply_to_fusion` (update the Fusion parts that use this design),
+`open_in_gui`. The library is the same folder the editor uses.
 
 ## Use it in Autodesk Fusion
 
@@ -163,8 +183,8 @@ their own don't update Fusion, so you can try things out without waiting for a r
 
 - **Placement:** the pattern centre sits on the face centre, with x along the world X axis (turned by
   your rotation).
-- **Cut or raise:** *Canvas → Relief* decides what happens. **through** cuts through the body,
-  **deboss** cuts the pattern in by the relief depth, **emboss** adds it on top. Switching between
+- **Cut or raise:** *Plate → Making it → Pattern is* decides what happens. **Cut through** cuts
+  through the body, **Sunk in** cuts the pattern in by the depth, **Raised** adds it on top. Switching between
   them while linked switches the Combine between cut and join.
 - **How long the link lasts:** until you close Fusion or stop the add-in. To link again later, run
   the command on the face once more.
@@ -195,6 +215,7 @@ their own don't update Fusion, so you can try things out without waiting for a r
 ```
 ventforge/
 ├── model.py         design file format: every parameter and its default
+├── params.py        what each parameter is called, does, and when it matters (editor + MCP)
 ├── pattern.py       geometry: places and shapes the holes
 ├── export.py        PNG, SVG, DXF, STEP and STL output, tube wrap, cut into part
 ├── gui.py           desktop editor

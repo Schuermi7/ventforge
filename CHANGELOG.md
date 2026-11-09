@@ -3,6 +3,50 @@
 All notable changes to VentForge. Versions follow [semantic versioning](https://semver.org);
 while we are below 1.0, a minor version (0.x.0) may change how something behaves.
 
+## 0.4.0 — 2026-11-09
+
+The editor shows only what matters for your design, and the AI assistant now knows what every
+setting does.
+
+### A clearer editor
+
+- **Only settings that do something are shown.** Before, about half of the sliders did nothing for
+  the chosen layout or hole shape. Now the panel hides them: star settings only for star holes,
+  corner radius only for rounded outlines, no hole settings for *Cracks* and *Slots* (they make their
+  own shapes), no spacing variation for layouts that cannot use it, and so on. A test checks every
+  layout and hole shape: each shown setting changes the holes, and each hidden one does not.
+- **Plain names.** Layouts are called *Along a path*, *Rings*, *Sunflower*, *Crossing lines*,
+  *Cracks*, *Slots* and *Your points*. *Relief* is now *Pattern is: Cut through / Sunk in / Raised*.
+  Gradients are now *Variation* tabs: *Size*, *Spacing*, *Turn* and *Morph*.
+- **New panel order.** The left panel is about the plate (library, size and outline, keep-out areas,
+  how it is made, reference image). The right panel is about the pattern (layout, holes, variation).
+  Rarely used settings sit under *More options*.
+- **Drawing tools next to their settings:** draw the outline, a path, your points or a hole shape
+  right where you pick them. The path, your points and the hole shape say how many points they have.
+- **Variations switch on when you change them.** A variation that was off did nothing, so changing
+  any of its values now switches it on.
+- **Every button once.** The toolbar no longer repeats panel buttons: *Fan grille*, *Draw outline*,
+  *Keep-out area* and *Zoom to fit* live in the panel or on the canvas (their keys `B`, `K`, `Z` still
+  work). *Reset* is gone (it did the same as *New*), and so is the menu bar that only held *Export*.
+- **Fewer clicks to draw.** Picking a *Drawn* outline or hole shape, or *Your points*, starts drawing
+  right away when nothing is drawn yet.
+
+### AI assistant (MCP)
+
+- `describe_parameters` explains every setting, with the name the editor shows, and describes each
+  layout and variation.
+- `set_params` lists the settings it was given that do nothing for the design (`no_effect`), using
+  the same rules as the editor. Like the editor, it switches a variation on when one of its values is set.
+- New `apply_to_fusion`: updates the Fusion parts that use the design, like *Ctrl+S* in the editor.
+- The library tools use the editor's library folder when you have changed it.
+
+### Fixes
+
+- *Randomness* on the *Turn* and *Morph* variations did nothing when the value was 0. It now adds up
+  to ±90° of turn or ±1 of morph. Designs that used it with a non-zero value look slightly different.
+- *Morph* into the shape the holes already have did nothing. The panel now says so.
+- The hole *aspect* setting changed the pattern for shapes that ignore it.
+
 ## 0.3.0 — 2026-11-09
 
 This release takes VentForge into your CAD program. Put a pattern on a face of your part in

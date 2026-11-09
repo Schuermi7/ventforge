@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mcp.server.mcpserver import Image, MCPServer
 
-from . import model
+from . import model, params
 from .model import Design
 
 PRESETS = Path(__file__).resolve().parent / "presets"
@@ -20,7 +20,9 @@ mcp = MCPServer("ventforge", instructions=(
     "Design vent hole patterns for 3D parts. Units mm, canvas centred at origin, y up, angles in degrees. "
     "Workflow: new_design (or open_design) -> describe_parameters -> set_params / add_control -> preview "
     "(look at the image and stats: open_area_ratio, min_wall_violations, thinnest_wall, pressure_drop_pa) -> iterate -> export. "
-    "The current design is a .vent.json file; call open_in_gui to let the user watch it live."))
+    "set_params lists in no_effect what you set that does nothing for this design (the editor hides those). "
+    "The current design is a .vent.json file; call open_in_gui to let the user watch it live. A design placed on a "
+    "Fusion part (~/Documents/VentForge/Fusion) updates there only after apply_to_fusion."))
 
 _current: Path | None = None
 
@@ -87,8 +89,17 @@ def open_design(path: str) -> dict:
     return {"path": str(p), "name": d.name, "stats": _stats(_generate(d))}
 
 
+def _library() -> Path:
+    """The editor's library folder (Library > Folder…), else ~/Documents/VentForge."""
+    try:
+        from PySide6.QtCore import QSettings
+    except ImportError:
+        return HOME
+    return Path(QSettings("VentForge", "VentForge").value("library", str(HOME)))
+
+
 def _preset(name: str) -> Path:
-    for folder in (PRESETS, HOME):  # built-ins first, then the user library (the editor's default folder)
+    for folder in (PRESETS, _library()):  # built-ins first, then the user library
         if (f := folder / f"{_safe(name)}.vent.json").exists():
             return f
     raise ValueError(f"no preset or library design named {name!r}; see list_presets")
@@ -104,17 +115,17 @@ def _safe(name: str) -> str:
 def list_presets() -> dict:
     """Names usable with new_design(preset=...): built-in presets, and your library (save_to_library)."""
     names = lambda f: sorted(p.name.removesuffix(".vent.json") for p in f.glob("*.vent.json"))
-    return {"built_in": names(PRESETS), "library": [n for n in names(HOME) if n != "current"]}
+    return {"built_in": names(PRESETS), "library": [n for n in names(_library()) if n != "current"]}
 
 
 @mcp.tool()
 def save_to_library(name: str) -> dict:
     """Save the current design (pattern, fan grille, keep-outs, machining) as a reusable library template,
     e.g. "92mm grille case X". It shows in the editor's library and in new_design(preset=name)."""
-    out = HOME / f"{_safe(name)}.vent.json"
+    out = _library() / f"{_safe(name)}.vent.json"
     if out == _path():
         raise ValueError("that is the current working file; pick another name")
-    HOME.mkdir(parents=True, exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
     d = _load()
     if d.name == "Untitled":
         d.name = name
@@ -135,23 +146,53 @@ def _schema(obj) -> dict:
 
 @mcp.tool()
 def describe_parameters() -> dict:
-    """Every parameter with its type and default, plus the allowed enum values. Parameter meanings are
-    documented in ventforge/model.py; pattern.<mode> holds the settings of each layout mode."""
+    """Every parameter with its type and default, the allowed enum values, and what each one does (`help`:
+    the editor's label and tooltip; use the labels when talking to the user). pattern.<mode> holds the settings
+    of each layout mode; only the one in pattern.mode is used."""
     return {"enums": model.CHOICES,  # keys: full path, or field name anywhere
+            "layouts": params.MODE_INFO,
+            "variations": {g: params.GRAD_INFO[g][1] for g in model.GRADS},
             "gradient_semantics": "size/spacing are multipliers (edge 1 = neutral), angle adds degrees, "
                                   "shape morphs 0..1 towards target_shape. A control has `value` at its "
-                                  "location blending to the gradient's `edge` value at distance `radius`.",
+                                  "location blending to the gradient's `edge` value at distance `radius`. "
+                                  "Setting anything in a gradient switches it on.",
             "list_items": {"keepouts": _schema(model.Keepout()), "controls": _schema(model.Control())},
+            "help": {p: params.help_text(p) for p in _leaves(_schema(Design()))},
             "defaults": _schema(Design())}
+
+
+def _leaves(tree: dict, path: str = ""):
+    for k, v in tree.items():
+        yield from _leaves(v, f"{path}{k}.") if isinstance(v, dict) else [f"{path}{k}"]
+
+
+def _patched(d: Design, patch: dict) -> Design:
+    """set_params' rule, the same as the editor's: a value set in a switched-off gradient switches it on,
+    unless the patch sets that gradient's enabled itself."""
+    d, flat = d.patched(patch), dict(_flat(patch))
+    for p, v in flat.items():
+        if (g := params.grad_of(p)) and f"gradients.{g}.enabled" not in flat:
+            params.switch_on(d, p, v)
+    return d
+
+
+def _flat(patch: dict, path: str = ""):
+    for k, v in patch.items():
+        yield from _flat(v, f"{path}{k}.") if isinstance(v, dict) else [(f"{path}{k}", v)]
 
 
 @mcp.tool()
 def set_params(patch: dict) -> dict:
     """Deep-merge a partial design, e.g. {"dot": {"shape": "hexagon", "diameter": 3},
-    "pattern": {"mode": "grid", "grid": {"spacing_x": 4.5}}}. Lists (points, controls) are replaced whole.
-    Saves the file (live-updates the GUI) and returns stats."""
-    _, r = _update(lambda d: d.patched(patch).resolve_images(_path().parent))
-    return {"stats": _stats(r)}
+    "pattern": {"mode": "grid", "grid": {"spacing_x": 4.5}}}. Lists (points, controls, keepouts) are replaced
+    whole: read them with get_design to add one. Saves the file (live-updates the GUI) and returns stats, plus
+    no_effect: the parameters you set that change nothing for this design (e.g. star settings on round holes)."""
+    d, r = _update(lambda d: _patched(d, patch).resolve_images(_path().parent))
+    hide = params.hidden(d)
+    out = {"stats": _stats(r)}
+    if dead := [p for p, _ in _flat(patch) if params.no_effect(d, p, hide)]:
+        out["no_effect"] = dead
+    return out
 
 
 @mcp.tool()
@@ -290,6 +331,14 @@ def cut_into_part(part_path: str, out_path: str, origin: list[float] = [0, 0, 0]
     cut(_generate(d), d, str(Path(part_path).expanduser().resolve()), str(out),
         origin=tuple(origin), normal=tuple(normal), x_dir=tuple(x_dir), depth=depth)
     return {"path": str(out), "bytes": out.stat().st_size}
+
+
+@mcp.tool()
+def apply_to_fusion() -> dict:
+    """Rebuild the Fusion parts this design is placed on (like Ctrl+S in the editor). Fusion skips the
+    MCP's and the editor's in-between saves because rebuilding is slow: call this once the design is done."""
+    model.mark_saved(_path())
+    return {"path": str(_path())}
 
 
 @mcp.tool()
