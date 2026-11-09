@@ -90,7 +90,8 @@ def state(mode, shape, grads):
 
 
 # every layout with round holes, with and without variations; every hole shape on the grid
-CASES = [(m, "circle", g) for m in MODES for g in (False, True)] + [(m, "star", False) for m in MODES]
+CASES = [(m, "circle", g) for m in MODES for g in (False, True)]
+CASES += [(m, "star", False) for m in MODES if m not in params.OWN_SHAPES]  # Cracks and Slots ignore hole shapes
 CASES += [("grid", s, g) for s in SHAPES if s != "circle" for g in (False, True)]
 
 

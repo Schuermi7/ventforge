@@ -1,16 +1,38 @@
-import pytest
-"""Runs the MCP server over real stdio, the way Claude talks to it."""
+"""The MCP server: over real stdio the way Claude talks to it, then each tool's rules directly."""
 import asyncio
+import json
+import sys
+from pathlib import Path
 
-from mcp_e2e import main
+import pytest
 
 
-def test_mcp_server_end_to_end(tmp_path):
-    asyncio.run(main(tmp_path))
-    assert (tmp_path / "e2e_preview.png").stat().st_size > 0
-    for ext in ("svg", "dxf", "step", "stl"):
-        assert (tmp_path / f"e2e.{ext}").stat().st_size > 0
-    assert (tmp_path / "e2e_tube.step").stat().st_size > 0
+async def _over_stdio(out: Path):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    params = StdioServerParameters(command=sys.executable, args=["-m", "ventforge.mcp_server"],
+                                   cwd=str(Path(__file__).resolve().parent.parent))
+    async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
+        await s.initialize()
+        assert "apply_to_fusion" in {t.name for t in (await s.list_tools()).tools}
+
+        async def call(name, **args):
+            res = await s.call_tool(name, args)
+            assert not res.is_error, (name, res.content)
+            return json.loads(next(c.text for c in res.content if c.type == "text"))
+
+        await call("new_design", path=str(out / "e2e.vent.json"), preset="hex_honeycomb")
+        await call("set_params", patch={"canvas": {"width": 150, "height": 80}})
+        await call("add_control", target="size", kind="line", points=[[-75, 0], [75, 0]], value=0.3, radius=30)
+        prev = await s.call_tool("preview", {"px": 300})
+        assert any(c.type == "image" and c.data for c in prev.content)
+        assert (await call("export", path=str(out / "e2e.svg")))["bytes"] > 0
+        assert (await s.call_tool("set_params", {"patch": {"dot": {"nope": 1}}})).is_error
+        assert (await s.call_tool("add_control", {"target": "sise"})).is_error
+
+
+def test_mcp_server_over_stdio(tmp_path):
+    asyncio.run(_over_stdio(tmp_path))
 
 
 def test_bad_patch_leaves_file_untouched(tmp_path):
@@ -54,6 +76,10 @@ def test_fit_open_area_hits_target(tmp_path):
     out = m.fit_open_area(0.3)
     assert abs(out["stats"]["open_area_ratio"] - 0.3) < 0.01
     assert m.get_design()["design"]["dot"]["diameter"] == out["dot.diameter"]
+    m.new_design(path=str(tmp_path / "g.vent.json"))  # a switched-off variation is switched on, like set_params
+    out = m.fit_open_area(0.3, param="gradients.size.edge", low=0.3, high=1.5)
+    assert abs(out["stats"]["open_area_ratio"] - 0.3) < 0.01
+    assert m.get_design()["design"]["gradients"]["size"]["enabled"]
 
 
 def test_fit_open_area_refuses_unreachable_target(tmp_path):
@@ -103,6 +129,8 @@ def test_set_params_reports_no_effect_and_switches_variations_on(tmp_path):
     assert m.get_design()["design"]["gradients"]["size"]["enabled"]  # like the editor: touching it switches it on
     m.set_params({"gradients": {"spacing": {"noise": 0.4, "enabled": False}}})
     assert not m.get_design()["design"]["gradients"]["spacing"]["enabled"]  # an explicit off wins
+    m.set_params({"gradients": {"angle": {"controls": []}}})
+    assert not m.get_design()["design"]["gradients"]["angle"]["enabled"]  # clearing is not editing
     assert "no_effect" not in m.set_params({"dot": {"shape": "star", "star_inner": 0.3}})
     assert "Inner size" in m.describe_parameters()["help"]["dot.star_inner"]
 

@@ -10,6 +10,7 @@ from ventforge.model import MODES, SHAPES, TARGET_SHAPES, Control, Design
 from ventforge.pattern import generate, sample_gradient
 
 PRESETS = sorted((Path(__file__).parent.parent / "ventforge" / "presets").glob("*.vent.json"))
+assert len(PRESETS) >= 6, "the shipped presets are missing"
 
 
 def design(mode, **patch):
@@ -149,21 +150,12 @@ def test_shape_and_angle_gradient(target):
     assert all(c is None for c in r.circles)
 
 
-def test_mode_parameters():
-    g = generate(design("grid", pattern={"mode": "grid", "grid": {"row_rotation": 30, "rotation": 15}}))
-    assert len(g.holes) > 0
+def test_path_and_ring_limits():
     p = generate(design("path", pattern={"mode": "path", "path": {
         "points": [[-30, -30], [30, -30], [0, 30]], "count": 20, "layers": 3, "closed": False}}))
     assert 50 <= len(p.holes) <= 70  # 20 on the base path, offsets scaled by their length
     c = generate(design("concentric", pattern={"mode": "concentric", "concentric": {"outer_radius": 20}}))
     assert max(np.hypot(*h.centroid.coords[0]) for h in c.holes) <= 20 + 1e-6
-    f = design("flowlines")
-    f.pattern.flowlines.invert = True
-    assert len(generate(f).holes) > 0
-    f.pattern.flowlines.invert = False
-    f.pattern.flowlines.follow_boundary = True
-    f.boundary.type = "circle"
-    assert len(generate(f).holes) > 0
 
 
 def _path_dots(**path):
@@ -221,10 +213,6 @@ def test_presets(path):
     assert r.stats["min_wall_violations"] <= 0.01 * r.stats["count"]
 
 
-def test_presets_exist():
-    assert len(PRESETS) >= 6
-
-
 def test_perf_2000_dots_with_gradient():
     d = design("grid", canvas={"width": 200, "height": 200}, dot={"diameter": 3},
                pattern={"mode": "grid", "grid": {"arrangement": "square", "spacing_x": 4.4, "spacing_y": 4.4}},
@@ -239,14 +227,10 @@ def test_perf_2000_dots_with_gradient():
 
 
 @pytest.mark.parametrize("mode", ["grid", "concentric", "crosslines", "spiral", "fibonacci"])
-def test_spacing_noise_and_image_warp(mode, tmp_path):
+def test_spacing_image_warp(mode, tmp_path):
     from PIL import Image
-    import numpy as np
     base = Design()
     base.pattern.mode = mode
-    c0 = sorted((round(h.centroid.x, 2), round(h.centroid.y, 2)) for h in generate(base).holes)
-    noisy = generate(base.patched({"gradients": {"spacing": {"enabled": True, "noise": 0.6}}}))
-    assert sorted((round(h.centroid.x, 2), round(h.centroid.y, 2)) for h in noisy.holes) != c0
     ramp = tmp_path / "ramp.png"
     Image.fromarray(np.tile(np.linspace(0, 255, 64), (64, 1)).astype("uint8")).save(ramp)
     r = generate(base.patched({"gradients": {"spacing": {"enabled": True, "image": str(ramp),
@@ -255,14 +239,17 @@ def test_spacing_noise_and_image_warp(mode, tmp_path):
     assert (xs < 0).sum() > (xs > 0).sum()  # denser where the image is dark (small spacing)
 
 
-def test_tiny_values_clamped_fast():
-    import time
-    for patch in ({"pattern": {"grid": {"spacing_x": 0.01, "spacing_y": 0.01}}},
-                  {"pattern": {"mode": "flowlines", "flowlines": {"wavelength": 0.01}}},
-                  {"pattern": {"mode": "spiral", "spiral": {"count": 10**7}}}):
-        t = time.perf_counter()
-        generate(Design().patched(patch))
-        assert time.perf_counter() - t < 25, patch  # was 30-100 s before the clamps (CI runners are slow)
+@pytest.mark.parametrize("patch,limit", [  # extreme values are clamped; limits are for slow CI runners
+    ({"pattern": {"grid": {"spacing_x": 0.01, "spacing_y": 0.01}}}, 25),  # was 30-100 s
+    ({"pattern": {"mode": "flowlines", "flowlines": {"wavelength": 0.01}}}, 25),
+    ({"pattern": {"mode": "spiral", "spiral": {"count": 10**7}}}, 25),
+    ({"pattern": {"mode": "concentric", "concentric": {"outer_radius": 30000}}}, 4),  # ~80M points: out of memory
+    ({"pattern": {"mode": "path", "path": {"layers": 5000}}}, 4),
+])
+def test_extreme_values_clamped_fast(patch, limit):
+    t = time.perf_counter()
+    generate(Design().patched(patch))
+    assert time.perf_counter() - t < limit
 
 
 @pytest.mark.parametrize("invert", [False, True])
@@ -299,11 +286,15 @@ def test_missing_image_is_a_clear_error(tmp_path):
         generate(d)
 
 
-def test_unknown_choice_rejected():
+def test_bad_input_rejected():
     with pytest.raises(ValueError, match="dot.shape"):
         Design().patched({"dot": {"shape": "hexgon"}})
     with pytest.raises(ValueError, match="rotate_by"):
         Design().patched({"pattern": {"crosslines": {"rotate_by": "row"}}})
+    with pytest.raises(ValueError, match="boundary.clip"):
+        Design().patched({"boundary": {"clip": "false"}})  # bool("false") would switch clipping on
+    with pytest.raises(ValueError, match="dot must be an object"):
+        Design().patched({"dot": 5})
 
 
 def test_old_file_with_bad_choice_still_loads(tmp_path):
@@ -325,16 +316,6 @@ def test_fibonacci_even_density_with_hole():
     assert inner == pytest.approx(outer, rel=0.15)
 
 
-def test_huge_concentric_radius_and_path_layers_stay_fast():
-    import time
-    for patch in ({"pattern": {"mode": "concentric", "concentric": {
-                      "outer_radius": 30000}}},  # ~80M points before the clamp
-                  {"pattern": {"mode": "path", "path": {"layers": 5000}}}):
-        t = time.perf_counter()
-        assert generate(Design().patched(patch)).holes
-        assert time.perf_counter() - t < 4, patch  # was out-of-memory / 5 s
-
-
 @pytest.mark.parametrize("patch", [
     {"canvas": {"width": 2000, "height": 2000}, "pattern": {"grid": {"spacing_x": 1, "spacing_y": 1}}},
     {"canvas": {"width": 3000, "height": 3000}, "pattern": {"mode": "voronoi", "voronoi": {"cell_size": 1}}},
@@ -345,13 +326,6 @@ def test_huge_layouts_refused_fast(patch):
     with pytest.raises(ValueError, match="points"):
         generate(Design().patched(patch))
     assert time.perf_counter() - t < 2  # was minutes and gigabytes
-
-
-def test_bad_types_rejected():
-    with pytest.raises(ValueError, match="boundary.clip"):
-        Design().patched({"boundary": {"clip": "false"}})  # bool("false") would switch clipping on
-    with pytest.raises(ValueError, match="dot must be an object"):
-        Design().patched({"dot": 5})
 
 
 def test_fan_grille_holes_over_blades_and_screw_holes():

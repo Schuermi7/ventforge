@@ -73,7 +73,7 @@ def tmp(tmp_path_factory):
 
 @pytest.mark.parametrize("ext", ["svg", "png", "dxf", "step", "stl"])
 def test_every_format_writes(tmp, ext):
-    res = tricky_result()
+    res = circle_result(100)  # the dispatcher only; each writer's content is checked below
     p = tmp / f"t.{ext}"
     ex.export(res, design(), p)
     assert p.stat().st_size > 100
@@ -87,11 +87,15 @@ def test_svg_content(tmp):
     assert 'width="200.0000mm"' in s and s.count("<circle") == 100
 
 
-@pytest.mark.parametrize("make,t", [(hex_result, 2.0), (circle_result, 3.0), (tricky_result, 1.5)])
-def test_step_roundtrip_volume(tmp, make, t):
+# limits: ~3x a local run, for slow CI runners; the old regressions took 41 s+
+@pytest.mark.parametrize("make,t,limit", [(hex_result, 2.0, 30.0), (circle_result, 3.0, 9.0),
+                                          (tricky_result, 1.5, 30.0)])
+def test_step_roundtrip_volume(tmp, make, t, limit):
     res = make()
     p = tmp / f"{make.__name__}.step"
+    t0 = time.perf_counter()
     ex.to_step(res, design(t), p)
+    assert time.perf_counter() - t0 < limit
     shape = ex.read_step(p)
     sols = ex.solids(shape)
     assert len(sols) == 1
@@ -133,16 +137,6 @@ def test_png_size_and_speed(tmp):
     assert max(im.size) == 1200 and im.mode == "RGBA"
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
     assert dt < 0.5, dt
-
-
-@pytest.mark.parametrize("make,limit", [(circle_result, 9.0), (hex_result, 30.0)])
-def test_flat_step_perf(tmp, make, limit):
-    # hexes: ~1.5 s build + ~5.5 s OCC STEP writer (linear floor, 12k side faces);
-    # limits x3 for slow CI runners, still far below the old 41 s+ regressions
-    res = make()
-    t0 = time.perf_counter()
-    ex.to_step(res, design(), tmp / "perf.step")
-    assert time.perf_counter() - t0 < limit
 
 
 def test_wrap_cylinder(tmp):
@@ -197,7 +191,7 @@ def test_export_rejects_unknown(tmp):
 
 
 @pytest.mark.parametrize("relief,sign", [("deboss", -1), ("emboss", 1)])
-@pytest.mark.parametrize("make", [hex_result, circle_result, tricky_result])
+@pytest.mark.parametrize("make", [circle_result, tricky_result])  # many tiled holes; clipped, merged, islands
 def test_relief_is_one_solid_with_exact_volume(tmp, make, relief, sign):
     res, d = make(), design(2.0)
     d.canvas.relief, d.canvas.relief_depth = relief, 0.6

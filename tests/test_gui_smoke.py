@@ -1,4 +1,4 @@
-"""Offscreen smoke test of the GUI: presets, edits, undo/redo, save, live reload, screenshot."""
+"""Offscreen smoke test of the GUI: presets, edits, undo/redo, drawing, save, live reload, exports."""
 import json
 import os
 import time
@@ -13,8 +13,6 @@ from PySide6.QtWidgets import QApplication
 
 from ventforge import gui
 from ventforge.model import MODES, Design
-
-OUT = Path(__file__).parent / "out"
 
 
 def wait(cond, timeout=20.0):
@@ -156,15 +154,3 @@ def test_gui_smoke(win, tmp_path):
         out = tmp_path / f"e{ext}"
         w.run_export(lambda r, d, out=out: gui.exporter().export(r, d, out), str(out))
         assert wait(lambda: not w.tasks, 60) and out.stat().st_size > 0, ext
-
-    # screenshot of a nice design
-    w.open_file(str(presets[0]) if presets else str(f), template=True)
-    w.add_control("size", "point")
-    settle(w)
-    OUT.mkdir(exist_ok=True)
-    w.resize(1500, 920)
-    QApplication.processEvents()
-    w.canvas.zoom_fit()
-    QApplication.processEvents()
-    assert w.grab().save(str(OUT / "gui.png"))
-    assert w.canvas.grab().save(str(OUT / "canvas.png"))

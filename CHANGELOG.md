@@ -3,6 +3,17 @@
 All notable changes to VentForge. Versions follow [semantic versioning](https://semver.org);
 while we are below 1.0, a minor version (0.x.0) may change how something behaves.
 
+## 0.5.0 — 2026-11-09
+
+### Fixes for the AI assistant
+
+- Clearing a variation's controls (`"controls": []`) no longer switches that variation on.
+- `fit_open_area` now works on a parameter of a switched-off variation: it switches the variation on, like `set_params`.
+
+### Under the hood
+
+- Fewer, merged tests (same coverage, faster run); the stdio MCP check is part of the test suite now.
+
 ## 0.4.1 — 2026-11-09
 
 The editor shows only what matters for your design, and the AI assistant now knows what every

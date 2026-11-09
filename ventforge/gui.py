@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QButtonGroup, QCh
                                QVBoxLayout, QWidget)
 
 from .model import CHOICES, FANS, GRADS, MODES, SHAPES, Control, Design, Keepout, Pattern, fan_grille, mark_saved
-from .params import DRAW, GRAD_INFO, MODE_INFO, TIPS, choice_text, hidden, label_for, switch_on
+from .params import GRAD_INFO, MODE_INFO, TIPS, choice_text, hidden, label_for, switch_on
 
 PRESETS = Path(__file__).resolve().parent / "presets"
 
@@ -99,6 +99,10 @@ SCALE = {"boundary.corner_radius": 1, "pattern.random.count": 2, "pattern.path.c
          **{f"gradients.{g}.radius": 1 for g in GRADS}}
 # rarely needed: folded into "More options"
 ADVANCED = {"offset_x", "offset_y", "even_spacing"}
+DRAW = {  # canvas drawing targets: fewest points, what to do
+    "outline": (3, "Click the corners of the plate outline"), "path": (2, "Click along the path"),
+    "points": (1, "Click where holes go"), "hole": (3, "Click the corners of the hole shape, at any size"),
+}
 DRAW_POINTS = {"outline": "boundary.points", "path": "pattern.path.points", "points": "pattern.custom_points.points",
                "hole": "dot.custom_points"}  # where each canvas drawing goes
 DRAW_ON_PICK = {("boundary.type", "custom"): "outline", ("dot.shape", "custom"): "hole",

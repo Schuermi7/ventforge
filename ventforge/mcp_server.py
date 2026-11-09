@@ -255,7 +255,7 @@ def fit_open_area(target: float, param: str = "dot.diameter", low: float | None 
     key = "fan_open_ratio" if d0.boundary.vent_diameter > 0 else "open_area_ratio"
 
     def err(v):
-        return _generate(d0.patched(_nested(param, v))).stats.get(key, 0.0) - target
+        return _generate(_patched(d0, _nested(param, v))).stats.get(key, 0.0) - target
 
     e_lo, e_hi = err(lo), err(hi)
     if e_lo * e_hi > 0:
@@ -269,7 +269,7 @@ def fit_open_area(target: float, param: str = "dot.diameter", low: float | None 
         else:
             hi = mid
     v = round((lo + hi) / 2, 3)
-    _, r = _update(lambda d: d.patched(_nested(param, v)))
+    _, r = _update(lambda d: _patched(d, _nested(param, v)))
     return {param: v, "stats": _stats(r)}
 
 

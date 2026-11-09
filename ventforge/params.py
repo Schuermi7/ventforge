@@ -104,10 +104,6 @@ GRAD_INFO = {  # what a gradient does, and how its numbers read
     "shape": ("Morph", "Blend the hole shape into another shape in places. 0 = own shape, 1 = the target.",
               "Morph at the control", "Morph everywhere else"),
 }
-DRAW = {  # canvas drawing targets: fewest points, what to do
-    "outline": (3, "Click the corners of the plate outline"), "path": (2, "Click along the path"),
-    "points": (1, "Click where holes go"), "hole": (3, "Click the corners of the hole shape, at any size"),
-}
 OWN_SHAPES = ("voronoi", "flowlines")  # layouts that make their own hole outlines
 SPACING_MODES = ("grid", "random", "spiral", "concentric", "fibonacci", "crosslines")  # follow the spacing gradient
 # shown, but only change exports or the checks, never the holes in the preview
@@ -210,7 +206,7 @@ def switch_on(d: Design, path: str, v) -> bool:
     """Editing a switched-off variation would do nothing, so it switches that variation on (not for Clear).
     Returns True when it did."""
     g = grad_of(path)
-    if g is None or v == "" or getattr(d.gradients, g).enabled:
+    if g is None or v in ("", []) or getattr(d.gradients, g).enabled:
         return False
     getattr(d.gradients, g).enabled = True
     return True
