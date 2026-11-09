@@ -3,10 +3,10 @@
 All notable changes to VentForge. Versions follow [semantic versioning](https://semver.org);
 while we are below 1.0, a minor version (0.x.0) may change how something behaves.
 
-## 0.4.0 — 2026-11-09
+## 0.4.1 — 2026-11-09
 
 The editor shows only what matters for your design, and the AI assistant now knows what every
-setting does.
+setting does. (0.4.0 was tagged but never published: a test caught the *Cracks* and *Slots* bug below.)
 
 ### A clearer editor
 
@@ -46,6 +46,8 @@ setting does.
   to ±90° of turn or ±1 of morph. Designs that used it with a non-zero value look slightly different.
 - *Morph* into the shape the holes already have did nothing. The panel now says so.
 - The hole *aspect* setting changed the pattern for shapes that ignore it.
+- *Cracks* and *Slots* moved when you changed the hole size, a setting they do not use. Saved
+  designs with these layouts may shift a little at the edges.
 
 ## 0.3.0 — 2026-11-09
 

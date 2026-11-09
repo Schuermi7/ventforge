@@ -807,7 +807,8 @@ def generate(design: Design) -> Result:
         return _finish(design, outline, [], [])
     shapely.prepare(inner)
     d = dot.diameter
-    reach = d * (max(1.0, dot.aspect) if dot.shape == "rounded_rectangle" else 1.0) * _gmax(gr.size, 1.0)
+    own = mode in ("voronoi", "flowlines")  # no dots: they pad their own cover, and the hole size must not move them
+    reach = 0.0 if own else d * (max(1.0, dot.aspect) if dot.shape == "rounded_rectangle" else 1.0) * _gmax(gr.size, 1.0)
     x0, y0, x1, y1 = outline.bounds
     pad = reach
     warp = gr.spacing.enabled and mode in WARP_MODES
