@@ -28,7 +28,7 @@ CHOICES = {
     "mode": MODES, "kind": ("point", "line", "curve"),
     "pattern.grid.rotate_by": ("row", "col", "both"),
     "pattern.crosslines.rotate_by": ("left", "right", "both"),
-    "keepouts.shape": ("circle", "rectangle"), "relief": ("through", "deboss", "emboss"),
+    "keepouts.shape": ("circle", "rectangle", "polygon"), "relief": ("through", "deboss", "emboss"),
 }
 # common fan sizes (mm): screw hole spacing, screw hole diameter (M3 clearance up to 60 mm, M4 above)
 FANS = {40: (32.0, 3.4), 50: (40.0, 3.4), 60: (50.0, 3.4), 80: (71.5, 4.3), 92: (82.5, 4.3),
@@ -223,13 +223,14 @@ class Gradients:
 @dataclass
 class Keepout:
     """An area without vent holes (screw, standoff, logo); hole=True also cuts it (a screw hole)."""
-    shape: str = "circle"         # circle | rectangle
+    shape: str = "circle"         # circle | rectangle | polygon
     x: float = 0.0                # centre
     y: float = 0.0
     width: float = 4.0            # diameter for a circle
     height: float = 4.0           # rectangle only
     clearance: float = 1.5        # extra free ring around it
     hole: bool = False
+    points: list[Pt] = field(default_factory=list)  # polygon outline, relative to x, y (e.g. a boss on a CAD face)
 
 
 @dataclass

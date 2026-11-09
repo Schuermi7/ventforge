@@ -4,9 +4,9 @@
     "id": "5f0c3a52-8e1b-4c7a-9d46-2b7f1e9a6c31",
     "author": "VentForge",
     "description": {
-        "": "Put a VentForge pattern on a planar face: cut through, deboss or emboss, as one Combine feature."
+        "": "Put a VentForge pattern on a planar face: cut through, deboss or emboss, as one Combine feature, live-linked to the VentForge editor."
     },
-    "version": "0.3.0",
+    "version": "0.4.0",
     "runOnStartup": true,
     "supportedOS": "windows|mac",
     "editEnabled": true

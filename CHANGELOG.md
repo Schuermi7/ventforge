@@ -3,7 +3,11 @@
 All notable changes to VentForge. Versions follow [semantic versioning](https://semver.org);
 while we are below 1.0, a minor version (0.x.0) may change how something behaves.
 
-## Unreleased
+## 0.3.0 — 2026-11-09
+
+This release takes VentForge into your CAD program. Put a pattern on a face of your part in
+Autodesk Fusion, keep editing it in VentForge, and save to see the result on the part. Patterns can
+now also be textures instead of holes.
 
 ### New: textures instead of holes
 
@@ -14,15 +18,30 @@ while we are below 1.0, a minor version (0.x.0) may change how something behaves
 - A slot that would cut the plate in two becomes a groove, so the part stays in one piece.
 - *Wrap onto cylinder* still cuts through and says so when a relief is set.
 
+### New: polygon keep-outs
+
+- Keep-outs can now have any outline (`shape: "polygon"`), not only circles and rectangles.
+
 ### New: Autodesk Fusion add-in
 
 - **Put a pattern on a face of your part in Fusion.** Run `ventforge install-fusion` once, then use
-  *Solid → Create → VentForge pattern*. Pick a flat face and a design, set a rotation, and press OK.
-  The pattern is added as **one Combine feature** (cut, or join for emboss) on the timeline, so Fusion
-  stays fast even with thousands of holes. Big sketch patterns are the most common complaint about
-  vent grilles in Fusion.
-- It uses the AI assistant's current design by default, so you can design with the assistant and
-  place the result in Fusion right away. *Edit in VentForge* opens the design in the editor.
+  *Solid → Create → VentForge pattern*. Pick a flat face, set a rotation, and press OK.
+  The pattern is added as **one Combine feature** (cut, or join for emboss) on the timeline, instead
+  of a sketch pattern with thousands of copies, the most common complaint about vent grilles in
+  Fusion.
+- **Start from the face.** With no design chosen, the add-in makes a new design shaped like the
+  face you picked. Holes in the face and anything standing on it (bosses, ribs, standoffs) become
+  keep-outs, so you see them while designing and no hole lands on them. *Choose design…* takes any
+  other design, for example the AI assistant's current one.
+- **Live link, one step.** Press OK once: the pattern goes onto the part and the VentForge editor
+  opens. Each time you save in the editor (Ctrl+S), Fusion rebuilds the pattern in the same
+  timeline feature. You don't close anything or run the command again. Moving sliders alone does
+  not rebuild, so you can try things out without waiting. The link lasts until you close Fusion.
+- **Switching relief while linked** switches the Combine between cut and join. If an update fails,
+  you get a message, and the part keeps the last good pattern.
+- **Heads-up: big patterns are slow in Fusion.** Every hole is a real cut in the solid. Thousands of
+  small or curved holes can keep Fusion busy for minutes on each rebuild. Check the hole count in
+  the editor before you save.
 - New command `ventforge tool design.vent.json out.step` writes the pattern as separate solids for
   other CAD programs and scripts.
 

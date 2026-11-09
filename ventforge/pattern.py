@@ -730,6 +730,8 @@ def _airflow(open_ratio):
 
 # ---------------------------------------------------------------- keep-outs, machining
 def _keepout_geom(k):
+    if k.shape == "polygon" and len(k.points) >= 3:
+        return shapely.make_valid(Polygon([(k.x + px, k.y + py) for px, py in k.points]))
     if k.shape == "rectangle":
         return box(k.x - k.width / 2, k.y - k.height / 2, k.x + k.width / 2, k.y + k.height / 2)
     return Point(k.x, k.y).buffer(k.width / 2, quad_segs=16)

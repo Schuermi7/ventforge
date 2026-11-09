@@ -427,3 +427,19 @@ def test_min_feature_flags_narrow_holes():
     d.machining.min_feature = 3.5
     s = generate(d).stats
     assert s["below_min_feature"] == s["count"]
+
+
+def test_face_design_from_fusion_avoids_what_sits_on_the_face(tmp_path):
+    """The JSON the Fusion add-in writes: face outline as boundary, its inner loops as keep-outs."""
+    import json
+    tri = [[-6, -5], [6, -5], [0, 7]]  # a rib footprint, relative to its centre
+    f = tmp_path / "face.vent.json"
+    f.write_text(json.dumps({"canvas": {"width": 80, "height": 60},
+                             "boundary": {"type": "custom", "points": [[-40, -30], [40, -30], [40, 30], [-40, 30]]},
+                             "keepouts": [{"shape": "circle", "x": -25, "y": 15, "width": 8},
+                                          {"shape": "polygon", "x": 15, "y": -5, "points": tri}]}))
+    d = Design.load(f)
+    holes = generate(d).holes
+    rib = shapely.Polygon([(15 + x, -5 + y) for x, y in tri]).buffer(1.5 - 1e-6)
+    boss = shapely.Point(-25, 15).buffer(4 + 1.5 - 1e-6)
+    assert holes and not any(rib.intersects(h) or boss.intersects(h) for h in holes)

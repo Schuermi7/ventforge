@@ -1,8 +1,9 @@
 # VentForge
 
 Design vent and perforation patterns for 3D printing, laser cutting and CNC, then export them as ready-to-use
-files. Use the desktop editor, or let an AI assistant such as Claude do the designing through the built-in
-MCP server. Both work on the same design file.
+files. Use the desktop editor, let an AI assistant such as Claude do the designing through the built-in
+MCP server, or put the pattern straight onto your part in Autodesk Fusion. All of them work on the same
+design file.
 
 ## Features
 
@@ -14,7 +15,7 @@ MCP server. Both work on the same design file.
 - **Boundary:** none, circle, rounded rectangle, or a drawn outline, with margin and clipping.
 - **Fan grilles:** one click for a 40–140 mm fan: holes only over the blades, 4 screw holes, and the
   share of the fan opening left open (airflow).
-- **Keep-outs:** circles or rectangles that stay free of holes (bosses, logos, screws), optionally cut as holes.
+- **Keep-outs:** circles, rectangles or any outline that stay free of holes (bosses, logos, screws), optionally cut as holes.
   Draw them on the canvas with the Keep-out tool (K; Shift for a circle, right-click to remove).
 - **Machining:** CNC tool radius (rounds inside corners, drops holes the cutter cannot reach) and laser
   kerf compensation for SVG/DXF. Set a minimum feature (about 2× nozzle for 3D printing) to flag holes
@@ -27,6 +28,8 @@ MCP server. Both work on the same design file.
   get thinner than your minimum.
 - **Airflow estimate:** pressure loss of the grille (Idelchik thin perforated plate) at 2 m/s, so two designs
   can be compared by airflow. A rough figure, not a flow simulation.
+- **Autodesk Fusion add-in:** put the pattern on a face of your part as one timeline feature, with
+  the face's holes and bosses as keep-outs, and a live link to the editor (see below).
 - Undo/redo, presets, and a personal library (also from the AI assistant: `save_to_library`).
 
 ## Install
@@ -113,26 +116,79 @@ The assistant works on `~/Documents/VentForge/current.vent.json`. If you open th
 ## Use it in Autodesk Fusion
 
 VentForge comes with a Fusion add-in. It puts a pattern on any flat face of your part as **one Combine
-feature**, instead of a sketch pattern with thousands of copies that slows Fusion down.
+feature** on the timeline, instead of a sketch pattern with thousands of copies. The pattern stays
+linked to its VentForge design, so you can keep editing it.
 
-```bash
-pip install "ventforge[cad]"
-ventforge install-fusion
-```
+### Set it up (once)
 
-In Fusion, open *Utilities → Add-Ins*, pick **VentForge** and click *Run*. Tick *Run on Startup* to keep
-it. Then use *Solid → Create → VentForge pattern*:
+1. Install VentForge with the CAD extra (or `ventforge[all]`):
 
-1. Pick a flat face of your part.
-2. Pick a design. The default is the current design of the AI assistant
-   (`~/Documents/VentForge/current.vent.json`). *Edit in VentForge* opens it in the editor.
-3. Set a rotation if you want one, and press OK.
+   ```bash
+   uv tool install "ventforge[all]"
+   ```
 
-The pattern centre goes on the face centre, with x along the world X axis. *Canvas → Relief* in the
-design decides what happens: **through** cuts through the body, **deboss** cuts the pattern in by the
-relief depth, and **emboss** adds it on top. The add-in runs your VentForge installation, because
-Fusion's own Python has no geometry libraries. Run `ventforge install-fusion` again after you update
-VentForge or move its environment.
+2. Copy the add-in into Fusion:
+
+   ```bash
+   ventforge install-fusion
+   ```
+
+3. In Fusion, open *Utilities → Add-Ins*, pick **VentForge** and click *Run*. Tick *Run on Startup* so
+   it loads with Fusion from now on.
+
+Run `ventforge install-fusion` again after you update VentForge or move its environment, then *Stop*
+and *Run* the add-in in Fusion. The add-in calls your VentForge installation, because Fusion's own
+Python has no geometry libraries.
+
+### Put a pattern on a part
+
+Open *Solid → Create → VentForge pattern*.
+
+1. **Pick a flat face** of your part.
+2. **Choose a design**, or leave *Design* empty for a new one:
+   - **Empty:** VentForge makes a design shaped like the face, saved in
+     `~/Documents/VentForge/Fusion`. Holes in the face and anything standing on it (bosses, ribs,
+     standoffs) become keep-outs, so you see them in the editor and no hole lands on them.
+   - ***Choose design…*** takes any saved design, for example one from your library or the AI
+     assistant's `current.vent.json`.
+3. **Set a rotation** if you want one and press **OK**.
+
+The pattern goes onto the part right away and the VentForge editor opens next to Fusion.
+
+### Edit it live
+
+Change the pattern in the editor and press **Ctrl+S**. Fusion rebuilds the pattern in place, in the
+same timeline feature. You don't need to close the editor or run the command again. Slider moves on
+their own don't update Fusion, so you can try things out without waiting for a rebuild after each one.
+
+- **Placement:** the pattern centre sits on the face centre, with x along the world X axis (turned by
+  your rotation).
+- **Cut or raise:** *Canvas → Relief* decides what happens. **through** cuts through the body,
+  **deboss** cuts the pattern in by the relief depth, **emboss** adds it on top. Switching between
+  them while linked switches the Combine between cut and join.
+- **How long the link lasts:** until you close Fusion or stop the add-in. To link again later, run
+  the command on the face once more.
+- The live link needs a parametric design (with a timeline). In direct modelling the pattern is
+  placed once.
+- Each manual save also writes a small `<design>.vent.json.saved` file next to the design. That is
+  how the add-in tells a real save from the editor's automatic saves. You can delete these files.
+
+> [!WARNING]
+> **Big patterns can be very slow in Fusion.** Every hole is a real cut in the solid. A few hundred
+> holes take seconds. Several thousand small holes, curved hole shapes (stars, custom outlines),
+> fine gradients or emboss on a large part can keep Fusion busy for minutes on every rebuild, and
+> make the timeline slow afterwards. Get the pattern right in the editor first, watch the hole count
+> in its status bar, and save (Ctrl+S) only when you want to see it on the part. For very large
+> grilles, test on a small face first, or bigger holes with wider spacing.
+
+### If something goes wrong
+
+- **An error box after a save:** the update was skipped, and your part keeps the last good pattern.
+  Fix the design (for example a relief depth thicker than the plate) and save again.
+- **A document briefly opens and closes on each update:** some Fusion builds cannot read STEP
+  files directly, so the add-in imports through a scratch document. This is expected.
+- **The command is missing from *Solid → Create*:** check that VentForge is running under
+  *Utilities → Add-Ins*.
 
 ## Project layout
 

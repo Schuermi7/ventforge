@@ -199,7 +199,10 @@ def _add_geom(path, g):
 
 
 def add_keepout_path(path, k):
-    if k.shape == "rectangle":
+    if k.shape == "polygon" and len(k.points) >= 3:
+        path.addPolygon(QPolygonF([S(k.x + px, k.y + py) for px, py in k.points]))
+        path.closeSubpath()
+    elif k.shape == "rectangle":
         path.addRect(QRectF(S(k.x - k.width / 2, k.y + k.height / 2), QSizeF(k.width, k.height)))
     else:
         path.addEllipse(S(k.x, k.y), k.width / 2, k.width / 2)
@@ -1506,6 +1509,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Save failed", f"{p}\n\n{e}")
             return False
+        Path(p + ".saved").touch()  # marks a manual save: the Fusion add-in rebuilds only on these, not on autosaves
         self.watch(p)
         self.dirty = False
         self.update_title()

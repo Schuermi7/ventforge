@@ -120,6 +120,16 @@ def test_gui_smoke(win, tmp_path):
     assert wait(lambda: json.loads(f.read_text())["dot"]["diameter"] == 3.5, 20), "edit not autosaved"
     assert not w.dirty
 
+    # only a manual save stamps <design>.saved, the Fusion add-in's cue to rebuild
+    stamp = Path(str(f) + ".saved")
+    t = stamp.stat().st_mtime_ns
+    w.set_param("dot.diameter", 3.0)
+    assert wait(lambda: json.loads(f.read_text())["dot"]["diameter"] == 3.0, 20)
+    assert stamp.stat().st_mtime_ns == t, "autosave must not stamp"
+    time.sleep(0.02)
+    assert w.save()
+    assert stamp.stat().st_mtime_ns > t
+
     # exports run in a worker
     for ext in (".svg", ".png", ".dxf"):
         out = tmp_path / f"e{ext}"
